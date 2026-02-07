@@ -255,6 +255,82 @@ func TestAdapter_Complete_ToolParameters_DefaultToEmptyObjectSchema(t *testing.T
 	}
 }
 
+func TestAdapter_Complete_StripsAdditionalPropertiesFromSchemas(t *testing.T) {
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		_ = json.Unmarshal(b, &gotBody)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "candidates": [{"content": {"parts": [{"text":"ok"}]}, "finishReason":"STOP"}],
+  "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1, "totalTokenCount": 2}
+}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &Adapter{APIKey: "k", BaseURL: srv.URL, Client: srv.Client()}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_, err := a.Complete(ctx, llm.Request{
+		Model:    "gemini-test",
+		Messages: []llm.Message{llm.User("hi")},
+		ResponseFormat: &llm.ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties":           map[string]any{"a": map[string]any{"type": "string"}},
+			},
+		},
+		Tools: []llm.ToolDefinition{{
+			Name: "t1",
+			Parameters: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"x": map[string]any{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties":           map[string]any{"y": map[string]any{"type": "string"}},
+					},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if gotBody == nil {
+		t.Fatalf("server did not capture request body")
+	}
+
+	// Tool schemas: additionalProperties must be stripped (Gemini Schema proto rejects it).
+	tools, _ := gotBody["tools"].([]any)
+	t0, _ := tools[0].(map[string]any)
+	fds, _ := t0["functionDeclarations"].([]any)
+	fd0, _ := fds[0].(map[string]any)
+	params, _ := fd0["parameters"].(map[string]any)
+	if _, ok := params["additionalProperties"]; ok {
+		t.Fatalf("unexpected additionalProperties in tool parameters: %#v", params["additionalProperties"])
+	}
+	props, _ := params["properties"].(map[string]any)
+	x, _ := props["x"].(map[string]any)
+	if _, ok := x["additionalProperties"]; ok {
+		t.Fatalf("unexpected nested additionalProperties in tool parameters: %#v", x["additionalProperties"])
+	}
+
+	// Response schema: additionalProperties must also be stripped.
+	genCfg, _ := gotBody["generationConfig"].(map[string]any)
+	rs, _ := genCfg["responseSchema"].(map[string]any)
+	if _, ok := rs["additionalProperties"]; ok {
+		t.Fatalf("unexpected additionalProperties in responseSchema: %#v", rs["additionalProperties"])
+	}
+}
+
 func TestAdapter_Complete_RejectsAudioAndDocumentParts(t *testing.T) {
 	a := &Adapter{APIKey: "k", BaseURL: "http://example.com"}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

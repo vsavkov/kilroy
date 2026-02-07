@@ -93,7 +93,9 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 		case "json_schema":
 			genCfg["responseMimeType"] = "application/json"
 			if req.ResponseFormat.JSONSchema != nil {
-				genCfg["responseSchema"] = req.ResponseFormat.JSONSchema
+				// Gemini's Schema is a restricted subset; strip JSON-schema-only fields
+				// (e.g., additionalProperties) so requests don't fail validation.
+				genCfg["responseSchema"] = sanitizeGeminiSchema(req.ResponseFormat.JSONSchema)
 			}
 		}
 	}
@@ -219,7 +221,9 @@ func (a *Adapter) Stream(ctx context.Context, req llm.Request) (llm.Stream, erro
 		case "json_schema":
 			genCfg["responseMimeType"] = "application/json"
 			if req.ResponseFormat.JSONSchema != nil {
-				genCfg["responseSchema"] = req.ResponseFormat.JSONSchema
+				// Gemini's Schema is a restricted subset; strip JSON-schema-only fields
+				// (e.g., additionalProperties) so requests don't fail validation.
+				genCfg["responseSchema"] = sanitizeGeminiSchema(req.ResponseFormat.JSONSchema)
 			}
 		}
 	}
@@ -449,10 +453,36 @@ func toGeminiFunctionDecls(tools []llm.ToolDefinition) []map[string]any {
 		out = append(out, map[string]any{
 			"name":        t.Name,
 			"description": t.Description,
-			"parameters":  params,
+			// Gemini's Schema is a restricted subset; strip JSON-schema-only fields
+			// (e.g., additionalProperties) so requests don't fail validation.
+			"parameters": sanitizeGeminiSchema(params),
 		})
 	}
 	return out
+}
+
+func sanitizeGeminiSchema(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, vv := range x {
+			// The Gemini Schema proto does not accept JSON Schema's additionalProperties field.
+			// Omitting it preserves compatibility while keeping the rest of the schema useful.
+			if k == "additionalProperties" {
+				continue
+			}
+			out[k] = sanitizeGeminiSchema(vv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i := range x {
+			out[i] = sanitizeGeminiSchema(x[i])
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 func toGeminiContents(msgs []llm.Message) (system string, contents []map[string]any, _ error) {
