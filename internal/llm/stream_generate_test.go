@@ -421,6 +421,7 @@ func TestStreamGenerate_Cancellation_EmitsAbortError(t *testing.T) {
 
 	prompt := "hi"
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	res, err := StreamGenerate(ctx, GenerateOptions{
 		Client:   c,
