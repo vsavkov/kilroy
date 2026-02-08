@@ -575,10 +575,11 @@ func (e *Engine) loopRestart(ctx context.Context, targetNodeID string, fromNodeI
 	}
 
 	e.appendProgress(map[string]any{
-		"event":         "loop_restart",
-		"restart_count": e.restartCount,
-		"target_node":   targetNodeID,
-		"new_logs_root": newLogsRoot,
+		"event":              "loop_restart",
+		"restart_count":      e.restartCount,
+		"target_node":        targetNodeID,
+		"new_logs_root":      newLogsRoot,
+		"retry_budget_reset": true,
 	})
 
 	// Switch to fresh logs; worktree stays the same.
@@ -608,7 +609,7 @@ func (e *Engine) loopRestart(ctx context.Context, targetNodeID string, fromNodeI
 	e.forceNextFidelity = ""
 	e.forceNextFidelityUsed = false
 
-	// Fresh loop state.
+	// Fresh loop state: retries are per-iteration and intentionally reset on loop_restart.
 	return e.runLoop(ctx, targetNodeID, nil, map[string]int{}, map[string]runtime.Outcome{})
 }
 

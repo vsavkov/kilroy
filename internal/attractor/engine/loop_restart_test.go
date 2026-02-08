@@ -3,8 +3,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -112,6 +114,109 @@ digraph G {
 	// node outcomes from the first (failed) iteration.
 	if _, found := eng.Context.Get("node.work.outcome"); found {
 		t.Error("stale node outcome leaked across restart boundary")
+	}
+}
+
+func TestLoopRestart_ResetsRetryBudgetPerIteration(t *testing.T) {
+	repo := t.TempDir()
+	runCmd(t, repo, "git", "init")
+	runCmd(t, repo, "git", "config", "user.name", "tester")
+	runCmd(t, repo, "git", "config", "user.email", "tester@example.com")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644)
+	runCmd(t, repo, "git", "add", "-A")
+	runCmd(t, repo, "git", "commit", "-m", "init")
+
+	dot := []byte(`
+digraph G {
+  graph [goal="test retry budget reset", max_restarts="3"]
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  work  [shape=box, llm_provider=openai, llm_model=gpt-5.2, max_retries="1", prompt="do work"]
+  check [shape=diamond]
+  start -> work
+  work -> check
+  check -> exit [condition="outcome=success"]
+  check -> work [condition="outcome=fail", loop_restart=true]
+}
+`)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	workCallsByLogsRoot := map[string]int{}
+	backend := &countingBackend{
+		fn: func(ctx context.Context, exec *Execution, node *model.Node, prompt string) (string, *runtime.Outcome, error) {
+			if node.ID != "work" {
+				return "ok", &runtime.Outcome{Status: runtime.StatusSuccess}, nil
+			}
+			logRoot := strings.TrimSpace(exec.LogsRoot)
+			workCallsByLogsRoot[logRoot]++
+			call := workCallsByLogsRoot[logRoot]
+			if strings.HasSuffix(logRoot, "restart-1") {
+				if call == 1 {
+					return "retry", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: "temporary upstream timeout"}, nil
+				}
+				return "ok", &runtime.Outcome{Status: runtime.StatusSuccess}, nil
+			}
+			return "fail", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: "temporary upstream timeout"}, nil
+		},
+	}
+
+	g, _, err := Prepare(dot)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	logsRoot := t.TempDir()
+	eng := &Engine{
+		Graph:           g,
+		Options:         RunOptions{RepoPath: repo, RunID: "test-retry-reset", LogsRoot: logsRoot, WorktreeDir: filepath.Join(logsRoot, "worktree"), RunBranchPrefix: "attractor/run", RequireClean: true},
+		DotSource:       dot,
+		LogsRoot:        logsRoot,
+		WorktreeDir:     filepath.Join(logsRoot, "worktree"),
+		Context:         runtime.NewContext(),
+		Registry:        NewDefaultRegistry(),
+		Interviewer:     &AutoApproveInterviewer{},
+		CodergenBackend: backend,
+	}
+	eng.RunBranch = "attractor/run/test-retry-reset"
+
+	res, err := eng.run(ctx)
+	if err != nil {
+		t.Fatalf("run() error: %v", err)
+	}
+	if res.FinalStatus != runtime.FinalSuccess {
+		t.Fatalf("FinalStatus = %v, want success", res.FinalStatus)
+	}
+
+	baseProgress := readProgressEvents(t, filepath.Join(logsRoot, "progress.ndjson"))
+	foundLoopRestart := false
+	for _, ev := range baseProgress {
+		if strings.TrimSpace(fmt.Sprint(ev["event"])) != "loop_restart" {
+			continue
+		}
+		foundLoopRestart = true
+		if reset, ok := ev["retry_budget_reset"].(bool); !ok || !reset {
+			t.Fatalf("expected loop_restart event to include retry_budget_reset=true: %#v", ev)
+		}
+	}
+	if !foundLoopRestart {
+		t.Fatalf("expected loop_restart event in base progress log")
+	}
+
+	restartProgress := readProgressEvents(t, filepath.Join(logsRoot, "restart-1", "progress.ndjson"))
+	retryCount := -1
+	for _, ev := range restartProgress {
+		if strings.TrimSpace(fmt.Sprint(ev["event"])) != "stage_retry_sleep" {
+			continue
+		}
+		if strings.TrimSpace(fmt.Sprint(ev["node_id"])) != "work" {
+			continue
+		}
+		retryCount = progressIntValue(ev["retries"])
+		break
+	}
+	if retryCount != 1 {
+		t.Fatalf("expected restart iteration retry counter to reset to 1, got %d", retryCount)
 	}
 }
 
@@ -417,6 +522,50 @@ digraph G {
 	}
 	if !strings.Contains(final.FailureReason, "loop_restart circuit breaker") {
 		t.Fatalf("final failure_reason = %q, want circuit breaker", final.FailureReason)
+	}
+}
+
+func readProgressEvents(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	events := make([]map[string]any, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode progress event %q: %v", line, err)
+		}
+		events = append(events, ev)
+	}
+	return events
+}
+
+func progressIntValue(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	case string:
+		i, err := strconv.Atoi(strings.TrimSpace(n))
+		if err != nil {
+			return -1
+		}
+		return i
+	default:
+		return -1
 	}
 }
 
