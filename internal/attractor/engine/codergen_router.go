@@ -617,10 +617,32 @@ func profileForProvider(provider string, modelID string) (agent.ProviderProfile,
 
 func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *model.Node, provider string, modelID string, prompt string) (string, *runtime.Outcome, error) {
 	stageDir := filepath.Join(execCtx.LogsRoot, node.ID)
-	if err := os.MkdirAll(stageDir, 0o755); err != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
-	}
 	providerKey := normalizeProviderKey(provider)
+	stderrPath := filepath.Join(stageDir, "stderr.log")
+	readStderr := func() string {
+		b, err := os.ReadFile(stderrPath)
+		if err != nil {
+			return ""
+		}
+		return string(b)
+	}
+	classifiedFailure := func(runErr error, stderr string) *runtime.Outcome {
+		c := classifyProviderCLIError(providerKey, stderr, runErr)
+		return &runtime.Outcome{
+			Status:        runtime.StatusFail,
+			FailureReason: c.FailureReason,
+			Meta: map[string]any{
+				"failure_class":     c.FailureClass,
+				"failure_signature": c.FailureSignature,
+			},
+			ContextUpdates: map[string]any{
+				"failure_class": c.FailureClass,
+			},
+		}
+	}
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return "", classifiedFailure(err, ""), nil
+	}
 
 	var isolatedEnv []string
 	var isolatedMeta map[string]any
@@ -628,7 +650,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		var err error
 		isolatedEnv, isolatedMeta, err = buildCodexIsolatedEnv(stageDir)
 		if err != nil {
-			return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
+			return "", classifiedFailure(err, ""), nil
 		}
 	}
 
@@ -648,7 +670,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		structuredSchemaPath = filepath.Join(stageDir, "output_schema.json")
 		structuredOutPath = filepath.Join(stageDir, "output.json")
 		if err := os.WriteFile(structuredSchemaPath, []byte(defaultCodexOutputSchema), 0o644); err != nil {
-			return "", nil, err
+			return "", classifiedFailure(err, ""), nil
 		}
 		if !hasArg(args, "--output-schema") {
 			args = append(args, "--output-schema", structuredSchemaPath)
@@ -695,11 +717,10 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		inv["structured_output_schema_path"] = structuredSchemaPath
 	}
 	if err := writeJSON(filepath.Join(stageDir, "cli_invocation.json"), inv); err != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
+		return "", classifiedFailure(err, ""), nil
 	}
 
 	stdoutPath := filepath.Join(stageDir, "stdout.log")
-	stderrPath := filepath.Join(stageDir, "stderr.log")
 
 	runOnce := func(args []string) (runErr error, exitCode int, dur time.Duration, err error) {
 		cmd := exec.CommandContext(ctx, exe, args...)
@@ -752,7 +773,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	runArgs := append([]string{}, actualArgs...)
 	runErr, exitCode, dur, runErrDetail := runOnce(runArgs)
 	if runErrDetail != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErrDetail.Error()}, nil
+		return "", classifiedFailure(runErrDetail, readStderr()), nil
 	}
 
 	if runErr != nil && providerKey == "openai" && hasArg(runArgs, "--output-schema") {
@@ -772,7 +793,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 
 			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(retryArgs)
 			if retryRunErr != nil {
-				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
+				return "", classifiedFailure(retryRunErr, readStderr()), nil
 			}
 			runErr = retryErr
 			exitCode = retryExitCode
@@ -790,7 +811,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 
 			retryEnv, retryMeta, buildErr := buildCodexIsolatedEnvWithName(stageDir, "codex-home-retry1")
 			if buildErr != nil {
-				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: buildErr.Error()}, nil
+				return "", classifiedFailure(buildErr, readStderr()), nil
 			}
 			isolatedEnv = retryEnv
 			inv["state_db_fallback_retry"] = true
@@ -804,7 +825,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 
 			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(runArgs)
 			if retryRunErr != nil {
-				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
+				return "", classifiedFailure(retryRunErr, readStderr()), nil
 			}
 			runErr = retryErr
 			exitCode = retryExitCode
@@ -815,7 +836,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	// Best-effort: treat stdout as ndjson if it parses line-by-line.
 	wroteJSON, hadContent, ndErr := bestEffortNDJSON(stageDir, stdoutPath)
 	if ndErr != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: ndErr.Error()}, nil
+		return "", classifiedFailure(ndErr, readStderr()), nil
 	}
 	if hadContent && !wroteJSON {
 		warnEngine(execCtx, "stdout was not valid ndjson; wrote events.ndjson only")
@@ -834,7 +855,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		outStr = string(outBytes)
 	}
 	if runErr != nil {
-		return outStr, &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErr.Error()}, nil
+		return outStr, classifiedFailure(runErr, readStderr()), nil
 	}
 	return outStr, nil, nil
 }
