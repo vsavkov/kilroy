@@ -630,6 +630,9 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		recordedArgs = insertPromptArg(args, "<prompt>")
 	}
 
+	launchCWD, _ := os.Getwd()
+	cmdEnv, envPathOverrides := normalizedCLIEnvWithStatePaths(launchCWD)
+
 	inv := map[string]any{
 		"provider":     provider,
 		"model":        modelID,
@@ -641,6 +644,9 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		// Metaspec: capture how env was populated so the invocation is replayable.
 		"env_mode":      "inherit",
 		"env_allowlist": []string{"*"},
+	}
+	if len(envPathOverrides) > 0 {
+		inv["env_path_overrides"] = envPathOverrides
 	}
 	if structuredOutPath != "" {
 		inv["structured_output_path"] = structuredOutPath
@@ -658,6 +664,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	runOnce := func(args []string) (runErr error, exitCode int, dur time.Duration, err error) {
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Dir = execCtx.WorktreeDir
+		cmd.Env = cmdEnv
 		if promptMode == "stdin" {
 			cmd.Stdin = strings.NewReader(prompt)
 		} else {
@@ -831,6 +838,41 @@ func envOr(key string, def string) string {
 		return def
 	}
 	return v
+}
+
+var cliStatePathEnvVars = []string{
+	"CODEX_HOME",
+	"CLAUDE_CONFIG_DIR",
+	"GEMINI_CONFIG_DIR",
+}
+
+func normalizedCLIEnvWithStatePaths(launchCWD string) ([]string, map[string]string) {
+	env := append([]string{}, os.Environ()...)
+	if strings.TrimSpace(launchCWD) == "" {
+		return env, map[string]string{}
+	}
+	overrides := map[string]string{}
+	for _, key := range cliStatePathEnvVars {
+		raw := strings.TrimSpace(os.Getenv(key))
+		if raw == "" || filepath.IsAbs(raw) {
+			continue
+		}
+		abs := filepath.Clean(filepath.Join(launchCWD, raw))
+		env = setEnvKV(env, key, abs)
+		overrides[key] = abs
+	}
+	return env, overrides
+}
+
+func setEnvKV(env []string, key string, val string) []string {
+	prefix := key + "="
+	for i := range env {
+		if strings.HasPrefix(env[i], prefix) {
+			env[i] = prefix + val
+			return env
+		}
+	}
+	return append(env, prefix+val)
 }
 
 func hasArg(args []string, want string) bool {
