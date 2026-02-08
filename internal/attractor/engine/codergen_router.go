@@ -725,19 +725,20 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		return runErr, exitCode, dur, nil
 	}
 
-	runErr, exitCode, dur, runErrDetail := runOnce(actualArgs)
+	runArgs := append([]string{}, actualArgs...)
+	runErr, exitCode, dur, runErrDetail := runOnce(runArgs)
 	if runErrDetail != nil {
 		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErrDetail.Error()}, nil
 	}
 
-	if runErr != nil && providerKey == "openai" && hasArg(actualArgs, "--output-schema") {
+	if runErr != nil && providerKey == "openai" && hasArg(runArgs, "--output-schema") {
 		stderrBytes, readErr := os.ReadFile(stderrPath)
 		if readErr == nil && isSchemaValidationFailure(string(stderrBytes)) {
 			warnEngine(execCtx, "codex schema validation failed; retrying once without --output-schema")
 			_ = copyFileContents(stdoutPath, filepath.Join(stageDir, "stdout.schema_failure.log"))
 			_ = copyFileContents(stderrPath, filepath.Join(stageDir, "stderr.schema_failure.log"))
 
-			retryArgs := removeArgWithValue(actualArgs, "--output-schema")
+			retryArgs := removeArgWithValue(runArgs, "--output-schema")
 			inv["schema_fallback_retry"] = true
 			inv["schema_fallback_reason"] = "schema_validation_failure"
 			inv["argv_schema_retry"] = retryArgs
@@ -746,6 +747,38 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 			}
 
 			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(retryArgs)
+			if retryRunErr != nil {
+				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
+			}
+			runErr = retryErr
+			exitCode = retryExitCode
+			dur += retryDur
+			runArgs = retryArgs
+		}
+	}
+
+	if runErr != nil && providerKey == "openai" {
+		stderrBytes, readErr := os.ReadFile(stderrPath)
+		if readErr == nil && isStateDBDiscrepancy(string(stderrBytes)) {
+			warnEngine(execCtx, "codex state-db discrepancy detected; retrying once with fresh state root")
+			_ = copyFileContents(stdoutPath, filepath.Join(stageDir, "stdout.state_db_failure.log"))
+			_ = copyFileContents(stderrPath, filepath.Join(stageDir, "stderr.state_db_failure.log"))
+
+			retryEnv, retryMeta, buildErr := buildCodexIsolatedEnvWithName(stageDir, "codex-home-retry1")
+			if buildErr != nil {
+				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: buildErr.Error()}, nil
+			}
+			isolatedEnv = retryEnv
+			inv["state_db_fallback_retry"] = true
+			inv["state_db_fallback_reason"] = "state_db_record_discrepancy"
+			if retryRoot, ok := retryMeta["state_root"]; ok {
+				inv["state_db_retry_state_root"] = retryRoot
+			}
+			if err := writeJSON(filepath.Join(stageDir, "cli_invocation.json"), inv); err != nil {
+				warnEngine(execCtx, fmt.Sprintf("write cli_invocation.json state-db metadata: %v", err))
+			}
+
+			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(runArgs)
 			if retryRunErr != nil {
 				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
 			}
@@ -801,7 +834,11 @@ func insertPromptArg(args []string, prompt string) []string {
 }
 
 func buildCodexIsolatedEnv(stageDir string) ([]string, map[string]any, error) {
-	codexHome := filepath.Join(stageDir, "codex-home")
+	return buildCodexIsolatedEnvWithName(stageDir, "codex-home")
+}
+
+func buildCodexIsolatedEnvWithName(stageDir string, homeDirName string) ([]string, map[string]any, error) {
+	codexHome := filepath.Join(stageDir, homeDirName)
 	codexStateRoot := filepath.Join(codexHome, ".codex")
 	xdgConfigHome := filepath.Join(codexHome, ".config")
 	xdgDataHome := filepath.Join(codexHome, ".local", "share")
@@ -1109,6 +1146,12 @@ func isSchemaValidationFailure(stderr string) bool {
 	return strings.Contains(s, "invalid_json_schema") ||
 		strings.Contains(s, "invalid schema for response_format") ||
 		strings.Contains(s, "invalid schema")
+}
+
+func isStateDBDiscrepancy(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "state db missing rollout path") ||
+		strings.Contains(s, "state db record_discrepancy")
 }
 
 func removeArgWithValue(args []string, key string) []string {
