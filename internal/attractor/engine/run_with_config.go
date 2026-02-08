@@ -83,6 +83,11 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 		return nil, err
 	}
 
+	cliCaps, err := preflightProviderCLIContracts(ctx, g, cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	// CXDB is required in v1 and must be reachable.
 	cxdbClient, bin, startup, err := ensureCXDBReady(ctx, cfg, opts.LogsRoot, opts.RunID)
 	if err != nil {
@@ -105,6 +110,9 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	}
 	sink := NewCXDBSink(cxdbClient, bin, opts.RunID, ci.ContextID, ci.HeadTurnID, bundleID)
 
+	router := NewCodergenRouter(cfg, catalog)
+	router.SetCLICapabilities(cliCaps)
+
 	eng := &Engine{
 		Graph:              g,
 		Options:            opts,
@@ -115,7 +123,7 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 		Context:            NewContextWithGraphAttrs(g),
 		Registry:           NewDefaultRegistry(),
 		Interviewer:        &AutoApproveInterviewer{},
-		CodergenBackend:    NewCodergenRouter(cfg, catalog),
+		CodergenBackend:    router,
 		CXDB:               sink,
 		ModelCatalogSHA:    catalog.SHA256,
 		ModelCatalogSource: resolved.Source,

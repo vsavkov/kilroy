@@ -102,7 +102,13 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 			return nil, err
 		}
 		catalog = cat
-		backend = NewCodergenRouter(cfg, catalog)
+		cliCaps, err := preflightProviderCLIContracts(ctx, g, cfg)
+		if err != nil {
+			return nil, err
+		}
+		router := NewCodergenRouter(cfg, catalog)
+		router.SetCLICapabilities(cliCaps)
+		backend = router
 
 		// Re-attach to the existing CXDB context head (metaspec required).
 		baseURL := strings.TrimSpace(ov.CXDBHTTPBaseURL)

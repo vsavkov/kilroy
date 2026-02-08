@@ -39,3 +39,22 @@ func TestDefaultCLIInvocation_OpenAI_DoesNotUseDeprecatedAskForApproval(t *testi
 		t.Fatalf("expected --json: %v", args)
 	}
 }
+
+func TestDefaultCLIInvocation_Anthropic_VerboseCapabilityGate(t *testing.T) {
+	router := NewCodergenRouter(nil, nil)
+	router.SetCLICapabilities(map[string]providerCLICapabilities{
+		"anthropic": {SupportsVerbose: true},
+	})
+	_, verboseArgs := router.cliInvocation("anthropic", "claude-3-7-sonnet", "/tmp/worktree")
+	if !hasArg(verboseArgs, "--verbose") {
+		t.Fatalf("expected --verbose when preflight indicates support; args=%v", verboseArgs)
+	}
+
+	router.SetCLICapabilities(map[string]providerCLICapabilities{
+		"anthropic": {SupportsVerbose: false},
+	})
+	_, noVerboseArgs := router.cliInvocation("anthropic", "claude-3-7-sonnet", "/tmp/worktree")
+	if hasArg(noVerboseArgs, "--verbose") {
+		t.Fatalf("did not expect --verbose when preflight indicates unsupported; args=%v", noVerboseArgs)
+	}
+}

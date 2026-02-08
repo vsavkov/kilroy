@@ -23,6 +23,7 @@ import (
 type CodergenRouter struct {
 	cfg     *RunConfigFile
 	catalog *modeldb.LiteLLMCatalog
+	cliCaps map[string]providerCLICapabilities
 
 	apiOnce   sync.Once
 	apiClient *llm.Client
@@ -30,7 +31,21 @@ type CodergenRouter struct {
 }
 
 func NewCodergenRouter(cfg *RunConfigFile, catalog *modeldb.LiteLLMCatalog) *CodergenRouter {
-	return &CodergenRouter{cfg: cfg, catalog: catalog}
+	return &CodergenRouter{
+		cfg:     cfg,
+		catalog: catalog,
+		cliCaps: map[string]providerCLICapabilities{},
+	}
+}
+
+func (r *CodergenRouter) SetCLICapabilities(caps map[string]providerCLICapabilities) {
+	if r == nil {
+		return
+	}
+	r.cliCaps = map[string]providerCLICapabilities{}
+	for provider, c := range caps {
+		r.cliCaps[normalizeProviderKey(provider)] = c
+	}
 }
 
 func (r *CodergenRouter) Run(ctx context.Context, exec *Execution, node *model.Node, prompt string) (string, *runtime.Outcome, error) {
@@ -594,9 +609,12 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
 	}
 
-	exe, args := defaultCLIInvocation(provider, modelID, execCtx.WorktreeDir)
+	exe, args := r.cliInvocation(provider, modelID, execCtx.WorktreeDir)
 	if exe == "" {
 		return "", nil, fmt.Errorf("no CLI mapping for provider %s", provider)
+	}
+	if normalizeProviderKey(provider) == "anthropic" && r.anthropicVerboseKnownUnsupported() {
+		warnEngine(execCtx, "anthropic CLI preflight indicates --verbose is unsupported; continuing without it")
 	}
 
 	// Metaspec: if a provider CLI supports both an event stream and a structured final JSON output,
@@ -830,6 +848,29 @@ func defaultCLIInvocation(provider string, modelID string, worktreeDir string) (
 		return "", nil
 	}
 	return exe, args
+}
+
+func (r *CodergenRouter) cliInvocation(provider string, modelID string, worktreeDir string) (exe string, args []string) {
+	exe, args = defaultCLIInvocation(provider, modelID, worktreeDir)
+	if strings.TrimSpace(exe) == "" {
+		return "", nil
+	}
+	if normalizeProviderKey(provider) != "anthropic" {
+		return exe, args
+	}
+	caps, hasCaps := r.cliCaps["anthropic"]
+	if hasCaps && caps.SupportsVerbose {
+		args = append(args, "--verbose")
+	}
+	return exe, args
+}
+
+func (r *CodergenRouter) anthropicVerboseKnownUnsupported() bool {
+	if r == nil {
+		return false
+	}
+	caps, hasCaps := r.cliCaps["anthropic"]
+	return hasCaps && !caps.SupportsVerbose
 }
 
 func envOr(key string, def string) string {
