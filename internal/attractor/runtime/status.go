@@ -109,17 +109,70 @@ func DecodeOutcomeJSON(b []byte) (Outcome, error) {
 		ContextUpdates     map[string]any `json:"context_updates"`
 		Notes              string         `json:"notes"`
 		FailureReason      string         `json:"failure_reason"`
+		Details            any            `json:"details"`
 	}
 	if err := json.Unmarshal(b, &legacy); err != nil {
 		return Outcome{}, err
 	}
+	status := StageStatus(legacy.Outcome)
 	o = Outcome{
-		Status:           StageStatus(legacy.Outcome),
+		Status:           status,
 		PreferredLabel:   legacy.PreferredNextLabel,
 		SuggestedNextIDs: legacy.SuggestedNextIDs,
 		ContextUpdates:   legacy.ContextUpdates,
 		Notes:            legacy.Notes,
-		FailureReason:    legacy.FailureReason,
+		FailureReason:    legacyFailureReason(status, legacy.FailureReason, legacy.Details, legacy.Notes),
 	}
 	return o.Canonicalize()
+}
+
+func legacyFailureReason(status StageStatus, failureReason string, details any, notes string) string {
+	if fr := strings.TrimSpace(failureReason); fr != "" {
+		return fr
+	}
+	st, err := ParseStageStatus(string(status))
+	if err != nil || (st != StatusFail && st != StatusRetry) {
+		return ""
+	}
+	if d := summarizeLegacyDetails(details); d != "" {
+		return d
+	}
+	if n := strings.TrimSpace(notes); n != "" {
+		return n
+	}
+	return "legacy fail outcome missing failure_reason"
+}
+
+func summarizeLegacyDetails(details any) string {
+	switch v := details.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := summarizeLegacyDetails(item); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "; ")
+	case map[string]any:
+		for _, key := range []string{"failure_reason", "reason", "message", "error", "details"} {
+			if s := strings.TrimSpace(fmt.Sprint(v[key])); s != "" && s != "<nil>" {
+				return s
+			}
+		}
+		b, err := json.Marshal(v)
+		if err != nil {
+			return strings.TrimSpace(fmt.Sprint(v))
+		}
+		return strings.TrimSpace(string(b))
+	default:
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "<nil>" {
+			return ""
+		}
+		return s
+	}
 }

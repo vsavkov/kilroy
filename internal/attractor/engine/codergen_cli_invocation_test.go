@@ -27,3 +27,15 @@ func TestDefaultCLIInvocation_GoogleGeminiNonInteractive(t *testing.T) {
 	}
 }
 
+func TestDefaultCLIInvocation_OpenAI_DoesNotUseDeprecatedAskForApproval(t *testing.T) {
+	exe, args := defaultCLIInvocation("openai", "gpt-5.3-codex", "/tmp/worktree")
+	if exe == "" {
+		t.Fatalf("expected non-empty executable for openai")
+	}
+	if hasArg(args, "--ask-for-approval") {
+		t.Fatalf("unexpected deprecated --ask-for-approval flag: %v", args)
+	}
+	if !hasArg(args, "--json") {
+		t.Fatalf("expected --json: %v", args)
+	}
+}

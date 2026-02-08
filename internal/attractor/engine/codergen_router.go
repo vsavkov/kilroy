@@ -652,35 +652,68 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, exe, actualArgs...)
-	cmd.Dir = execCtx.WorktreeDir
-	if promptMode == "stdin" {
-		cmd.Stdin = strings.NewReader(prompt)
-	} else {
-		// Avoid interactive reads if the CLI tries stdin for confirmations.
-		cmd.Stdin = strings.NewReader("")
-	}
 	stdoutPath := filepath.Join(stageDir, "stdout.log")
 	stderrPath := filepath.Join(stageDir, "stderr.log")
-	stdoutFile, err := os.Create(stdoutPath)
-	if err != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
-	}
-	stderrFile, err := os.Create(stderrPath)
-	if err != nil {
-		_ = stdoutFile.Close()
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: err.Error()}, nil
-	}
-	defer func() { _ = stdoutFile.Close(); _ = stderrFile.Close() }()
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stderrFile
 
-	start := time.Now()
-	runErr := cmd.Run()
-	dur := time.Since(start)
-	exitCode := -1
-	if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+	runOnce := func(args []string) (runErr error, exitCode int, dur time.Duration, err error) {
+		cmd := exec.CommandContext(ctx, exe, args...)
+		cmd.Dir = execCtx.WorktreeDir
+		if promptMode == "stdin" {
+			cmd.Stdin = strings.NewReader(prompt)
+		} else {
+			// Avoid interactive reads if the CLI tries stdin for confirmations.
+			cmd.Stdin = strings.NewReader("")
+		}
+		stdoutFile, err := os.Create(stdoutPath)
+		if err != nil {
+			return nil, -1, 0, err
+		}
+		defer func() { _ = stdoutFile.Close() }()
+		stderrFile, err := os.Create(stderrPath)
+		if err != nil {
+			return nil, -1, 0, err
+		}
+		defer func() { _ = stderrFile.Close() }()
+		cmd.Stdout = stdoutFile
+		cmd.Stderr = stderrFile
+		start := time.Now()
+		runErr = cmd.Run()
+		dur = time.Since(start)
+		exitCode = -1
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		return runErr, exitCode, dur, nil
+	}
+
+	runErr, exitCode, dur, runErrDetail := runOnce(actualArgs)
+	if runErrDetail != nil {
+		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErrDetail.Error()}, nil
+	}
+
+	if runErr != nil && normalizeProviderKey(provider) == "openai" && hasArg(actualArgs, "--output-schema") {
+		stderrBytes, readErr := os.ReadFile(stderrPath)
+		if readErr == nil && isSchemaValidationFailure(string(stderrBytes)) {
+			warnEngine(execCtx, "codex schema validation failed; retrying once without --output-schema")
+			_ = copyFileContents(stdoutPath, filepath.Join(stageDir, "stdout.schema_failure.log"))
+			_ = copyFileContents(stderrPath, filepath.Join(stageDir, "stderr.schema_failure.log"))
+
+			retryArgs := removeArgWithValue(actualArgs, "--output-schema")
+			inv["schema_fallback_retry"] = true
+			inv["schema_fallback_reason"] = "schema_validation_failure"
+			inv["argv_schema_retry"] = retryArgs
+			if err := writeJSON(filepath.Join(stageDir, "cli_invocation.json"), inv); err != nil {
+				warnEngine(execCtx, fmt.Sprintf("write cli_invocation.json fallback metadata: %v", err))
+			}
+
+			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(retryArgs)
+			if retryRunErr != nil {
+				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
+			}
+			runErr = retryErr
+			exitCode = retryExitCode
+			dur += retryDur
+		}
 	}
 
 	// Best-effort: treat stdout as ndjson if it parses line-by-line.
@@ -778,7 +811,7 @@ func defaultCLIInvocation(provider string, modelID string, worktreeDir string) (
 	switch normalizeProviderKey(provider) {
 	case "openai":
 		exe = envOr("KILROY_CODEX_PATH", "codex")
-		args = []string{"exec", "--json", "--ask-for-approval", "never", "--sandbox", "workspace-write", "-m", modelID, "-C", worktreeDir}
+		args = []string{"exec", "--json", "--sandbox", "workspace-write", "-m", modelID, "-C", worktreeDir}
 	case "anthropic":
 		exe = envOr("KILROY_CLAUDE_PATH", "claude")
 		args = []string{"-p", "--output-format", "stream-json", "--model", modelID}
@@ -815,9 +848,39 @@ const defaultCodexOutputSchema = `{
     "final": { "type": "string" },
     "summary": { "type": "string" }
   },
-  "additionalProperties": true
+  "required": ["final", "summary"],
+  "additionalProperties": false
 }
 `
+
+func isSchemaValidationFailure(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "invalid_json_schema") ||
+		strings.Contains(s, "invalid schema for response_format") ||
+		strings.Contains(s, "invalid schema")
+}
+
+func removeArgWithValue(args []string, key string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == key {
+			if i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
+}
+
+func copyFileContents(src string, dst string) error {
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, b, 0o644)
+}
 
 // bestEffortNDJSON always writes events.ndjson (a copy of stdout.log) and, if the
 // file is valid ndjson, also writes events.json as a JSON array.

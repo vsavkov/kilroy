@@ -1,6 +1,9 @@
 package runtime
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseStageStatus_CanonicalAndLegacy(t *testing.T) {
 	cases := []struct {
@@ -73,3 +76,31 @@ func TestDecodeOutcomeJSON_AcceptsCanonicalAndLegacyShapes(t *testing.T) {
 	}
 }
 
+func TestDecodeOutcomeJSON_LegacyFailDetails_PopulatesFailureReason(t *testing.T) {
+	o, err := DecodeOutcomeJSON([]byte(`{"outcome":"fail","details":["module download blocked"],"notes":"verify step failed"}`))
+	if err != nil {
+		t.Fatalf("DecodeOutcomeJSON: %v", err)
+	}
+	if o.Status != StatusFail {
+		t.Fatalf("status: got %q want %q", o.Status, StatusFail)
+	}
+	if strings.TrimSpace(o.FailureReason) == "" {
+		t.Fatalf("expected non-empty failure_reason")
+	}
+	if !strings.Contains(strings.ToLower(o.FailureReason), "module") {
+		t.Fatalf("failure_reason should summarize details, got: %q", o.FailureReason)
+	}
+}
+
+func TestDecodeOutcomeJSON_LegacyRetryDetails_PopulatesFailureReason(t *testing.T) {
+	o, err := DecodeOutcomeJSON([]byte(`{"outcome":"retry","details":"transient timeout"}`))
+	if err != nil {
+		t.Fatalf("DecodeOutcomeJSON: %v", err)
+	}
+	if o.Status != StatusRetry {
+		t.Fatalf("status: got %q want %q", o.Status, StatusRetry)
+	}
+	if strings.TrimSpace(o.FailureReason) == "" {
+		t.Fatalf("expected non-empty failure_reason")
+	}
+}
