@@ -3,13 +3,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -499,45 +496,4 @@ wait
 		t.Fatalf("write blocking probe cli: %v", err)
 	}
 	return p
-}
-
-func mustReadPIDFile(t *testing.T, path string) int {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		b, err := os.ReadFile(path)
-		if err == nil {
-			pid, convErr := strconv.Atoi(strings.TrimSpace(string(b)))
-			if convErr != nil || pid <= 0 {
-				t.Fatalf("invalid pid in %s: %q (%v)", path, strings.TrimSpace(string(b)), convErr)
-			}
-			return pid
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("read pid file %s: %v", path, err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for pid file %s", path)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
-func waitForProcessGone(t *testing.T, pid int, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		if !probeProcessExists(pid) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("process %d still running after %s", pid, timeout)
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-}
-
-func probeProcessExists(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

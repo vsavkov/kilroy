@@ -107,13 +107,14 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = bin.Close() }()
 	if startup != nil {
+		// Defer process shutdown after bin close is deferred so shutdown runs first (LIFO).
 		defer func() { _ = startup.shutdownManagedProcesses() }()
 	}
 	if startup != nil && overrides.OnCXDBStartup != nil {
-		overrides.OnCXDBStartup(*startup)
+		overrides.OnCXDBStartup(startup)
 	}
-	defer func() { _ = bin.Close() }()
 	bundleID, bundle, _, err := cxdb.KilroyAttractorRegistryBundle()
 	if err != nil {
 		return nil, err

@@ -41,7 +41,8 @@ type RunOptions struct {
 	RequireClean bool
 
 	// Optional callback invoked after CXDB/UI bootstrap and before pipeline execution starts.
-	OnCXDBStartup func(info CXDBStartupInfo)
+	// Pointer is used to avoid copying synchronization primitives inside CXDBStartupInfo.
+	OnCXDBStartup func(info *CXDBStartupInfo)
 }
 
 func (o *RunOptions) applyDefaults() error {

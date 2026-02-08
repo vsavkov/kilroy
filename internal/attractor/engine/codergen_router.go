@@ -646,19 +646,20 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		return "", classifiedFailure(err, ""), nil
 	}
 
+	exe, args := defaultCLIInvocation(provider, modelID, execCtx.WorktreeDir)
+	if exe == "" {
+		return "", nil, fmt.Errorf("no CLI mapping for provider %s", provider)
+	}
+	codexSemantics := usesCodexCLISemantics(providerKey, exe)
+
 	var isolatedEnv []string
 	var isolatedMeta map[string]any
-	if providerKey == "openai" {
+	if codexSemantics {
 		var err error
 		isolatedEnv, isolatedMeta, err = buildCodexIsolatedEnv(stageDir)
 		if err != nil {
 			return "", classifiedFailure(err, ""), nil
 		}
-	}
-
-	exe, args := defaultCLIInvocation(provider, modelID, execCtx.WorktreeDir)
-	if exe == "" {
-		return "", nil, fmt.Errorf("no CLI mapping for provider %s", provider)
 	}
 
 	// Metaspec: if a provider CLI supports both an event stream and a structured final JSON output,
@@ -668,7 +669,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	// fail fast (which is preferred to silently dropping observability artifacts).
 	var structuredOutPath string
 	var structuredSchemaPath string
-	if providerKey == "openai" {
+	if codexSemantics {
 		structuredSchemaPath = filepath.Join(stageDir, "output_schema.json")
 		structuredOutPath = filepath.Join(stageDir, "output.json")
 		if err := os.WriteFile(structuredSchemaPath, []byte(defaultCodexOutputSchema), 0o644); err != nil {
@@ -702,7 +703,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		"prompt_bytes": len(prompt),
 	}
 	// Metaspec: capture how env was populated so the invocation is replayable.
-	if providerKey == "openai" {
+	if codexSemantics {
 		inv["env_mode"] = "isolated"
 		inv["env_scope"] = "codex"
 		for k, v := range isolatedMeta {
@@ -727,7 +728,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	runOnce := func(args []string) (runErr error, exitCode int, dur time.Duration, err error) {
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Dir = execCtx.WorktreeDir
-		if providerKey == "openai" {
+		if codexSemantics {
 			cmd.Env = isolatedEnv
 			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		}
@@ -756,7 +757,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		}
 		idleTimeout := time.Duration(0)
 		killGrace := time.Duration(0)
-		if providerKey == "openai" {
+		if codexSemantics {
 			idleTimeout = codexIdleTimeout()
 			killGrace = codexKillGrace()
 		}
@@ -778,7 +779,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		return "", classifiedFailure(runErrDetail, readStderr()), nil
 	}
 
-	if runErr != nil && providerKey == "openai" && hasArg(runArgs, "--output-schema") {
+	if runErr != nil && codexSemantics && hasArg(runArgs, "--output-schema") {
 		stderrBytes, readErr := os.ReadFile(stderrPath)
 		if readErr == nil && isSchemaValidationFailure(string(stderrBytes)) {
 			warnEngine(execCtx, "codex schema validation failed; retrying once without --output-schema")
@@ -804,7 +805,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		}
 	}
 
-	if runErr == nil && providerKey == "openai" && hasArg(runArgs, "--output-schema") && strings.TrimSpace(structuredOutPath) != "" {
+	if runErr == nil && codexSemantics && hasArg(runArgs, "--output-schema") && strings.TrimSpace(structuredOutPath) != "" {
 		unknownKeys, payload, contractErr := inspectCodexStructuredOutputContract(structuredOutPath)
 		if contractErr != nil {
 			return "", classifiedFailure(contractErr, readStderr()), nil
@@ -839,7 +840,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		}
 	}
 
-	if runErr != nil && providerKey == "openai" {
+	if runErr != nil && codexSemantics {
 		stderrBytes, readErr := os.ReadFile(stderrPath)
 		if readErr == nil && isStateDBDiscrepancy(string(stderrBytes)) {
 			warnEngine(execCtx, "codex state-db discrepancy detected; retrying once with fresh state root")
@@ -1241,6 +1242,14 @@ func emitCXDBToolTurns(ctx context.Context, eng *Engine, nodeID string, ev agent
 			eng.Warn(fmt.Sprintf("cxdb append ToolResult failed (node=%s tool=%s call_id=%s): %v", nodeID, toolName, callID, err))
 		}
 	}
+}
+
+func usesCodexCLISemantics(providerKey string, exe string) bool {
+	if normalizeProviderKey(providerKey) == "openai" {
+		return true
+	}
+	base := strings.ToLower(strings.TrimSpace(filepath.Base(exe)))
+	return base == "codex" || strings.HasPrefix(base, "codex.")
 }
 
 func defaultCLIInvocation(provider string, modelID string, worktreeDir string) (exe string, args []string) {

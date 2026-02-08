@@ -9,9 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
-	"strings"
 	"time"
 
 	"github.com/strongdm/kilroy/internal/cxdb"

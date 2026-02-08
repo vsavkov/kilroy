@@ -169,10 +169,11 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 				return nil, err
 			}
 			startup = startupInfo
+			defer func() { _ = bin.Close() }()
 			if startupInfo != nil {
+				// Defer process shutdown after bin close is deferred so shutdown runs first (LIFO).
 				defer func() { _ = startupInfo.shutdownManagedProcesses() }()
 			}
-			defer func() { _ = bin.Close() }()
 			bundleID, bundle, _, err := cxdb.KilroyAttractorRegistryBundle()
 			if err != nil {
 				return nil, err

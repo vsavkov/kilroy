@@ -44,7 +44,7 @@ func TestRunWithConfig_CLIBackend_OpenAISchemaFallback(t *testing.T) {
 	cxdbSrv := newCXDBTestServer(t)
 
 	cli := filepath.Join(t.TempDir(), "codex")
-if err := os.WriteFile(cli, []byte(`#!/usr/bin/env bash
+	if err := os.WriteFile(cli, []byte(`#!/usr/bin/env bash
 set -euo pipefail
 
 schema=""

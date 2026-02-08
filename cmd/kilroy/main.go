@@ -155,7 +155,10 @@ func attractorRun(args []string) {
 	res, err := engine.RunWithConfig(ctx, dotSource, cfg, engine.RunOptions{
 		RunID:    runID,
 		LogsRoot: logsRoot,
-		OnCXDBStartup: func(info engine.CXDBStartupInfo) {
+		OnCXDBStartup: func(info *engine.CXDBStartupInfo) {
+			if info == nil {
+				return
+			}
 			if info.UIURL == "" {
 				return
 			}
