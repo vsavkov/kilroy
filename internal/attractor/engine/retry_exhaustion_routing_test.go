@@ -27,7 +27,8 @@ digraph G {
   t [
     shape=parallelogram,
     max_retries=1,
-    tool_command="echo attempt >> attempts.txt; exit 1"
+    timeout="1",
+    tool_command="echo attempt >> attempts.txt; sleep 2"
   ]
   fail_route [
     shape=parallelogram,
@@ -74,4 +75,3 @@ digraph G {
 		t.Fatalf("routed.txt: got %q want %q", got, "fail")
 	}
 }
-

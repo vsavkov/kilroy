@@ -27,7 +27,8 @@ digraph G {
   t [
     shape=parallelogram,
     max_retries=1,
-    tool_command="test -f .attempt && echo ok || (touch .attempt; echo fail; exit 1)"
+    timeout="1",
+    tool_command="test -f .attempt && echo ok || (touch .attempt; sleep 2)"
   ]
   start -> t -> exit
 }
@@ -69,7 +70,8 @@ digraph G {
     shape=parallelogram,
     max_retries=1,
     allow_partial=true,
-    tool_command="echo fail; exit 1"
+    timeout="1",
+    tool_command="echo fail; sleep 2"
   ]
   start -> t -> exit
 }
@@ -92,4 +94,3 @@ digraph G {
 		t.Fatalf("t outcome: got %q want %q", out.Status, runtime.StatusPartialSuccess)
 	}
 }
-

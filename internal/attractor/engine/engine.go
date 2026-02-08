@@ -238,7 +238,27 @@ func Run(ctx context.Context, dotSource []byte, opts RunOptions) (*Result, error
 	return eng.run(ctx)
 }
 
-func (e *Engine) run(ctx context.Context) (*Result, error) {
+func (e *Engine) run(ctx context.Context) (res *Result, runErr error) {
+	finalizeOnError := false
+	defer func() {
+		if runErr == nil || !finalizeOnError {
+			return
+		}
+		finalPath := filepath.Join(e.LogsRoot, "final.json")
+		if _, err := os.Stat(finalPath); err == nil {
+			return
+		}
+		reason := strings.TrimSpace(runErr.Error())
+		if reason == "" {
+			reason = "run failed"
+		}
+		nodeID := ""
+		if e.Context != nil {
+			nodeID = e.Context.GetString("current_node", "")
+		}
+		_, _ = e.finalizeTerminal(ctx, runtime.FinalFail, "", nodeID, reason)
+	}()
+
 	if e.Options.RepoPath == "" {
 		return nil, fmt.Errorf("repo.path is required")
 	}
@@ -277,6 +297,7 @@ func (e *Engine) run(ctx context.Context) (*Result, error) {
 	if err := gitutil.AddWorktree(e.Options.RepoPath, e.WorktreeDir, e.RunBranch); err != nil {
 		return nil, err
 	}
+	finalizeOnError = true
 
 	// Run metadata.
 	if err := e.writeManifest(baseSHA); err != nil {
@@ -315,7 +336,25 @@ func (e *Engine) run(ctx context.Context) (*Result, error) {
 	return e.runLoop(ctx, current, completed, nodeRetries, nodeOutcomes)
 }
 
-func (e *Engine) runLoop(ctx context.Context, current string, completed []string, nodeRetries map[string]int, nodeOutcomes map[string]runtime.Outcome) (*Result, error) {
+func (e *Engine) runLoop(ctx context.Context, current string, completed []string, nodeRetries map[string]int, nodeOutcomes map[string]runtime.Outcome) (res *Result, runErr error) {
+	defer func() {
+		if runErr == nil {
+			return
+		}
+		reason := strings.TrimSpace(runErr.Error())
+		if reason == "" {
+			reason = "run failed"
+		}
+		nodeID := ""
+		if e.Context != nil {
+			nodeID = e.Context.GetString("current_node", "")
+		}
+		if nodeID == "" {
+			nodeID = strings.TrimSpace(current)
+		}
+		_, _ = e.finalizeTerminal(ctx, runtime.FinalFail, "", nodeID, reason)
+	}()
+
 	for {
 		node := e.Graph.Nodes[current]
 		if node == nil {
@@ -372,48 +411,7 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 				return nil, err
 			}
 			e.cxdbCheckpointSaved(ctx, node.ID, out.Status, sha)
-			completionTurnID, err := e.cxdbRunCompleted(ctx, sha)
-			if err != nil {
-				return nil, err
-			}
-			final := runtime.FinalOutcome{
-				Timestamp:         time.Now().UTC(),
-				Status:            runtime.FinalSuccess,
-				RunID:             e.Options.RunID,
-				FinalGitCommitSHA: sha,
-				CXDBContextID:     cxdbContextID(e.CXDB),
-				CXDBHeadTurnID:    completionTurnID,
-			}
-			finalPath := filepath.Join(e.LogsRoot, "final.json")
-			_ = final.Save(finalPath)
-			if e.CXDB != nil {
-				_, _ = e.CXDB.PutArtifactFile(ctx, "", "final.json", finalPath)
-			}
-			// Convenience tarball (metaspec SHOULD): run.tgz excluding worktree/.
-			runTar := filepath.Join(e.LogsRoot, "run.tgz")
-			_ = writeTarGz(runTar, e.LogsRoot, func(rel string, d os.DirEntry) bool {
-				if rel == "run.tgz" || rel == "run.tgz.tmp" {
-					return false
-				}
-				if rel == "worktree" || strings.HasPrefix(rel, "worktree/") {
-					return false
-				}
-				return true
-			})
-			if e.CXDB != nil {
-				if _, err := os.Stat(runTar); err == nil {
-					_, _ = e.CXDB.PutArtifactFile(ctx, "", "run.tgz", runTar)
-				}
-			}
-			return &Result{
-				RunID:          e.Options.RunID,
-				LogsRoot:       e.LogsRoot,
-				WorktreeDir:    e.WorktreeDir,
-				RunBranch:      e.RunBranch,
-				FinalStatus:    runtime.FinalSuccess,
-				FinalCommitSHA: sha,
-				Warnings:       e.warningsCopy(),
-			}, nil
+			return e.finalizeTerminal(ctx, runtime.FinalSuccess, sha, "", "")
 		}
 
 		e.cxdbStageStarted(ctx, node)
@@ -459,78 +457,9 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 		}
 		if next == nil {
 			if out.Status == runtime.StatusFail {
-				failedTurnID, _ := e.cxdbRunFailed(ctx, node.ID, sha, out.FailureReason)
-				final := runtime.FinalOutcome{
-					Timestamp:         time.Now().UTC(),
-					Status:            runtime.FinalFail,
-					RunID:             e.Options.RunID,
-					FinalGitCommitSHA: sha,
-					CXDBContextID:     cxdbContextID(e.CXDB),
-					CXDBHeadTurnID:    failedTurnID,
-				}
-				finalPath := filepath.Join(e.LogsRoot, "final.json")
-				_ = final.Save(finalPath)
-				if e.CXDB != nil {
-					_, _ = e.CXDB.PutArtifactFile(ctx, "", "final.json", finalPath)
-				}
-				runTar := filepath.Join(e.LogsRoot, "run.tgz")
-				_ = writeTarGz(runTar, e.LogsRoot, func(rel string, d os.DirEntry) bool {
-					if rel == "run.tgz" || rel == "run.tgz.tmp" {
-						return false
-					}
-					if rel == "worktree" || strings.HasPrefix(rel, "worktree/") {
-						return false
-					}
-					return true
-				})
-				if e.CXDB != nil {
-					if _, err := os.Stat(runTar); err == nil {
-						_, _ = e.CXDB.PutArtifactFile(ctx, "", "run.tgz", runTar)
-					}
-				}
 				return nil, fmt.Errorf("stage failed with no outgoing fail edge: %s", out.FailureReason)
 			}
-			completionTurnID, err := e.cxdbRunCompleted(ctx, sha)
-			if err != nil {
-				return nil, err
-			}
-			final := runtime.FinalOutcome{
-				Timestamp:         time.Now().UTC(),
-				Status:            runtime.FinalSuccess,
-				RunID:             e.Options.RunID,
-				FinalGitCommitSHA: sha,
-				CXDBContextID:     cxdbContextID(e.CXDB),
-				CXDBHeadTurnID:    completionTurnID,
-			}
-			finalPath := filepath.Join(e.LogsRoot, "final.json")
-			_ = final.Save(finalPath)
-			if e.CXDB != nil {
-				_, _ = e.CXDB.PutArtifactFile(ctx, "", "final.json", finalPath)
-			}
-			runTar := filepath.Join(e.LogsRoot, "run.tgz")
-			_ = writeTarGz(runTar, e.LogsRoot, func(rel string, d os.DirEntry) bool {
-				if rel == "run.tgz" || rel == "run.tgz.tmp" {
-					return false
-				}
-				if rel == "worktree" || strings.HasPrefix(rel, "worktree/") {
-					return false
-				}
-				return true
-			})
-			if e.CXDB != nil {
-				if _, err := os.Stat(runTar); err == nil {
-					_, _ = e.CXDB.PutArtifactFile(ctx, "", "run.tgz", runTar)
-				}
-			}
-			return &Result{
-				RunID:          e.Options.RunID,
-				LogsRoot:       e.LogsRoot,
-				WorktreeDir:    e.WorktreeDir,
-				RunBranch:      e.RunBranch,
-				FinalStatus:    runtime.FinalSuccess,
-				FinalCommitSHA: sha,
-				Warnings:       e.warningsCopy(),
-			}, nil
+			return e.finalizeTerminal(ctx, runtime.FinalSuccess, sha, "", "")
 		}
 		e.appendProgress(map[string]any{
 			"event":     "edge_selected",
@@ -639,6 +568,101 @@ func (e *Engine) loopRestart(ctx context.Context, targetNodeID string, failedNod
 
 	// Fresh loop state.
 	return e.runLoop(ctx, targetNodeID, nil, map[string]int{}, map[string]runtime.Outcome{})
+}
+
+func (e *Engine) finalizeTerminal(ctx context.Context, status runtime.FinalStatus, finalSHA string, failedNodeID string, failureReason string) (*Result, error) {
+	finalSHA = strings.TrimSpace(finalSHA)
+	if finalSHA == "" {
+		finalSHA = e.currentRunSHA()
+	}
+
+	failureReason = strings.TrimSpace(failureReason)
+	if status == runtime.FinalFail && failureReason == "" {
+		failureReason = "run failed"
+	}
+
+	headTurnID := ""
+	switch status {
+	case runtime.FinalSuccess:
+		if turnID, err := e.cxdbRunCompleted(ctx, finalSHA); err == nil {
+			headTurnID = turnID
+		} else {
+			e.Warn(fmt.Sprintf("cxdb run completion event failed: %v", err))
+		}
+	case runtime.FinalFail:
+		if turnID, err := e.cxdbRunFailed(ctx, failedNodeID, finalSHA, failureReason); err == nil {
+			headTurnID = turnID
+		} else {
+			e.Warn(fmt.Sprintf("cxdb run failure event failed: %v", err))
+		}
+	}
+	if strings.TrimSpace(headTurnID) == "" && e.CXDB != nil {
+		headTurnID = strings.TrimSpace(e.CXDB.HeadTurnID)
+	}
+
+	final := runtime.FinalOutcome{
+		Timestamp:         time.Now().UTC(),
+		Status:            status,
+		RunID:             e.Options.RunID,
+		FinalGitCommitSHA: finalSHA,
+		FailureReason:     failureReason,
+		CXDBContextID:     cxdbContextID(e.CXDB),
+		CXDBHeadTurnID:    headTurnID,
+	}
+	finalPath := filepath.Join(e.LogsRoot, "final.json")
+	if err := final.Save(finalPath); err != nil {
+		return nil, err
+	}
+	if e.CXDB != nil {
+		_, _ = e.CXDB.PutArtifactFile(ctx, "", "final.json", finalPath)
+	}
+
+	// Convenience tarball (metaspec SHOULD): run.tgz excluding worktree/.
+	runTar := filepath.Join(e.LogsRoot, "run.tgz")
+	_ = writeTarGz(runTar, e.LogsRoot, func(rel string, d os.DirEntry) bool {
+		if rel == "run.tgz" || rel == "run.tgz.tmp" {
+			return false
+		}
+		if rel == "worktree" || strings.HasPrefix(rel, "worktree/") {
+			return false
+		}
+		return true
+	})
+	if e.CXDB != nil {
+		if _, err := os.Stat(runTar); err == nil {
+			_, _ = e.CXDB.PutArtifactFile(ctx, "", "run.tgz", runTar)
+		}
+	}
+
+	if status == runtime.FinalSuccess {
+		return &Result{
+			RunID:          e.Options.RunID,
+			LogsRoot:       e.LogsRoot,
+			WorktreeDir:    e.WorktreeDir,
+			RunBranch:      e.RunBranch,
+			FinalStatus:    runtime.FinalSuccess,
+			FinalCommitSHA: finalSHA,
+			Warnings:       e.warningsCopy(),
+		}, nil
+	}
+	return nil, nil
+}
+
+func (e *Engine) currentRunSHA() string {
+	if e == nil {
+		return ""
+	}
+	if dir := strings.TrimSpace(e.WorktreeDir); dir != "" {
+		if sha, err := gitutil.HeadSHA(dir); err == nil {
+			return strings.TrimSpace(sha)
+		}
+	}
+	if dir := strings.TrimSpace(e.Options.RepoPath); dir != "" {
+		if sha, err := gitutil.HeadSHA(dir); err == nil {
+			return strings.TrimSpace(sha)
+		}
+	}
+	return strings.TrimSpace(e.baseSHA)
 }
 
 func (e *Engine) executeNode(ctx context.Context, node *model.Node) (runtime.Outcome, error) {
