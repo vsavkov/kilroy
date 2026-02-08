@@ -713,7 +713,8 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 
 	runErr, exitCode, dur, runErrDetail := runOnce(actualArgs)
 	if runErrDetail != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErrDetail.Error()}, nil
+		out := cliFailureOutcome(provider, fmt.Errorf("invocation setup failed: %w", runErrDetail), "", "")
+		return "", &out, nil
 	}
 
 	if runErr != nil && normalizeProviderKey(provider) == "openai" && hasArg(actualArgs, "--output-schema") {
@@ -733,7 +734,8 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 
 			retryErr, retryExitCode, retryDur, retryRunErr := runOnce(retryArgs)
 			if retryRunErr != nil {
-				return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: retryRunErr.Error()}, nil
+				out := cliFailureOutcome(provider, fmt.Errorf("invocation setup failed: %w", retryRunErr), "", "")
+				return "", &out, nil
 			}
 			runErr = retryErr
 			exitCode = retryExitCode
@@ -744,7 +746,8 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	// Best-effort: treat stdout as ndjson if it parses line-by-line.
 	wroteJSON, hadContent, ndErr := bestEffortNDJSON(stageDir, stdoutPath)
 	if ndErr != nil {
-		return "", &runtime.Outcome{Status: runtime.StatusFail, FailureReason: ndErr.Error()}, nil
+		out := cliFailureOutcome(provider, fmt.Errorf("stdout parse failed: %w", ndErr), "", "")
+		return "", &out, nil
 	}
 	if hadContent && !wroteJSON {
 		warnEngine(execCtx, "stdout was not valid ndjson; wrote events.ndjson only")
@@ -762,8 +765,15 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	} else {
 		outStr = string(outBytes)
 	}
+	stderrStr := ""
+	if stderrBytes, rerr := os.ReadFile(stderrPath); rerr != nil {
+		warnEngine(execCtx, fmt.Sprintf("read stderr.log: %v", rerr))
+	} else {
+		stderrStr = string(stderrBytes)
+	}
 	if runErr != nil {
-		return outStr, &runtime.Outcome{Status: runtime.StatusFail, FailureReason: runErr.Error()}, nil
+		out := cliFailureOutcome(provider, runErr, outStr, stderrStr)
+		return outStr, &out, nil
 	}
 	return outStr, nil, nil
 }
@@ -963,6 +973,55 @@ func copyFileContents(src string, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, b, 0o644)
+}
+
+func cliFailureOutcome(provider string, runErr error, stdoutText string, stderrText string) runtime.Outcome {
+	provider = normalizeProviderKey(provider)
+	if provider == "" {
+		provider = "provider"
+	}
+
+	reason := strings.TrimSpace(func() string {
+		if runErr == nil {
+			return ""
+		}
+		return runErr.Error()
+	}())
+	if detail := summarizeCLIFailureDetail(stderrText, stdoutText); detail != "" {
+		reason = detail
+	}
+	if reason == "" {
+		reason = "unknown CLI failure"
+	}
+	failureReason := fmt.Sprintf("%s CLI failed: %s", provider, reason)
+
+	out := runtime.Outcome{
+		Status:        runtime.StatusFail,
+		FailureReason: failureReason,
+		Meta:          map[string]any{},
+	}
+	class := classifyFailureClass(out)
+	out.Meta[failureMetaClass] = string(class)
+	out.Meta[failureMetaSignature] = restartFailureSignature(out)
+	return out
+}
+
+func summarizeCLIFailureDetail(stderrText string, stdoutText string) string {
+	for _, body := range []string{stderrText, stdoutText} {
+		body = strings.TrimSpace(body)
+		if body == "" {
+			continue
+		}
+		lines := strings.Split(body, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			return truncate(line, 300)
+		}
+	}
+	return ""
 }
 
 // bestEffortNDJSON always writes events.ndjson (a copy of stdout.log) and, if the
