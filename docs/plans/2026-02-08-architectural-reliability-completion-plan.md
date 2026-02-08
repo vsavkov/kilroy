@@ -2,17 +2,17 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Eliminate the remaining reliability gaps where deterministic failures still consume retry budget and provider CLI contract mismatches are discovered too late.
+**Goal:** Ensure deterministic failures fail fast without consuming retry budget, and surface provider CLI contract/model issues before stage execution with deterministic preflight artifacts.
 
-**Architecture:** Keep the existing run/resume/loop-restart foundation, but extend reliability contracts to stage retry and provider adapter boundaries. Deterministic failures must be labeled explicitly at the source (`codergen`, fan-in) and must short-circuit retries. Add deterministic provider preflight with a persisted `preflight_report.json` so provider contract/model issues fail fast before long-running graph execution.
+**Architecture:** Use one shared failure-policy contract for classification and retry decisions across stage retry, loop restart, and fan-in. Classify failures at the source (especially provider CLI adapters), then consume normalized classes in retry logic. Add deterministic provider CLI preflight in `RunWithConfig` before CXDB health checks and always persist `preflight_report.json` (pass and fail paths).
 
-**Tech Stack:** Go 1.22, stdlib `testing`, existing Attractor engine integration tests, existing CXDB test harness, local CLI wrappers in tests.
+**Tech Stack:** Go 1.25, stdlib `testing`, existing Attractor engine integration tests, existing CXDB harness, shell guardrail script.
 
 ---
 
-## Baseline (Validated 2026-02-08)
+## Baseline (Revalidated 2026-02-08)
 
-The following is already green in this branch and is the baseline for this completion plan:
+Run and confirm green before starting:
 
 1. `go test ./internal/attractor/runtime -count=1`
 2. `go test ./internal/attractor/engine -count=1`
@@ -20,68 +20,97 @@ The following is already green in this branch and is the baseline for this compl
 4. `go test ./internal/llm/providers/... -count=1`
 5. `bash scripts/e2e-guardrail-matrix.sh`
 
-Real-run artifact evidence shows remaining issues despite the green baseline:
+Known reliability gaps this plan closes:
 
-1. Deterministic provider/implementation failures still consume full node retry budget before failing (`progress.ndjson` in `/tmp/kilroy-dttf-real-cxdb-20260208T171236Z-postfix/logs`).
-2. Anthropic CLI contract mismatch (`--output-format=stream-json` with `--print` requiring `--verbose`) is discovered during branch execution instead of preflight (`stderr.log` under `.../01-impl_tracer_a/...`).
-3. Gemini model-not-found is discovered at runtime (`ModelNotFoundError`) rather than preflight (`stderr.log` under `.../02-impl_tracer_b/...`).
+1. Deterministic stage failures still retry until attempts are exhausted.
+2. Provider CLI contract mismatches are discovered during stage execution instead of preflight.
+3. Provider model-availability failures are not consistently class-tagged at source.
+4. Targeted `go test -run ...` commands can silently pass as `[no tests to run]` if names drift.
 
 ---
 
-### Task 1: Add Failing Tests For Failure-Class Retry Gating
+## Mandatory Test-Run Rule (All Tasks)
+
+For every targeted `go test -run` command in this plan:
+
+1. Use anchored regexes (`'^TestName$'` or explicit alternation with `^...$`).
+2. Treat output containing `[no tests to run]` as a hard failure.
+
+Example pattern:
+
+```bash
+out="$(go test ./internal/attractor/engine -run '^TestRun_DeterministicFailure_DoesNotRetry$' -count=1 2>&1)"
+printf '%s\n' "$out"
+if grep -q '\[no tests to run\]' <<<"$out"; then
+  echo "ERROR: targeted test did not execute"
+  exit 1
+fi
+```
+
+---
+
+### Task 1: Add Shared Failure-Policy Contract Tests
 
 **Files:**
-- Create: `internal/attractor/engine/retry_failure_class_test.go`
-- Reuse: `internal/attractor/engine/engine_test.go` helpers (`runCmd`, `assertExists`)
-- Test: `internal/attractor/engine/retry_failure_class_test.go`
+- Create: `internal/attractor/engine/failure_policy_test.go`
+- Reuse: `internal/attractor/engine/loop_restart_policy.go`
 
-**Step 1: Write failing deterministic-short-circuit test**
+**Step 1: Write failing normalization + retry-policy tests**
 
 ```go
-func TestRun_DeterministicFailure_DoesNotRetry(t *testing.T) {
-    // handler returns StatusFail + Meta.failure_class=deterministic
-    // graph default_max_retry=3
-    // expect exactly one attempt and zero stage_retry_sleep events for node
+func TestFailurePolicy_NormalizeFailureClass(t *testing.T) {
+    cases := map[string]string{
+        "transient":      failureClassTransientInfra,
+        "transient_infra": failureClassTransientInfra,
+        "permanent":      failureClassDeterministic,
+        "":               "",
+    }
+    for in, want := range cases {
+        if got := normalizedFailureClass(in); got != want {
+            t.Fatalf("normalizedFailureClass(%q)=%q want %q", in, got, want)
+        }
+    }
+}
+
+func TestFailurePolicy_ShouldRetryOutcome_ClassGated(t *testing.T) {
+    if !shouldRetryOutcome(runtime.Outcome{Status: runtime.StatusFail}, failureClassTransientInfra) {
+        t.Fatalf("expected transient fail to retry")
+    }
+    if shouldRetryOutcome(runtime.Outcome{Status: runtime.StatusFail}, failureClassDeterministic) {
+        t.Fatalf("expected deterministic fail to not retry")
+    }
 }
 ```
 
-**Step 2: Write failing transient-retry test**
-
-```go
-func TestRun_TransientFailure_StillRetries(t *testing.T) {
-    // handler returns StatusFail + Meta.failure_class=transient_infra for first attempt
-    // then success on second attempt
-    // expect at least one stage_retry_sleep event and eventual success
-}
-```
-
-**Step 3: Run tests to verify red**
+**Step 2: Run tests to verify red**
 
 Run:
 
 ```bash
-go test ./internal/attractor/engine -run 'TestRun_DeterministicFailure_DoesNotRetry|TestRun_TransientFailure_StillRetries' -count=1
+out="$(go test ./internal/attractor/engine -run '^TestFailurePolicy_NormalizeFailureClass$|^TestFailurePolicy_ShouldRetryOutcome_ClassGated$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
 ```
 
-Expected: FAIL because `executeWithRetry` currently retries all `fail|retry` outcomes unconditionally.
+Expected: FAIL because `shouldRetryOutcome` does not exist yet.
 
-**Step 4: Commit failing tests**
+**Step 3: Commit failing tests**
 
 ```bash
-git add internal/attractor/engine/retry_failure_class_test.go
-git commit -m "test(engine): reproduce missing failure-class retry gating"
+git add internal/attractor/engine/failure_policy_test.go
+git commit -m "test(engine): add shared failure-policy contract coverage"
 ```
 
 ---
 
-### Task 2: Implement Failure-Class Retry Gating In Engine Retry Loop
+### Task 2: Implement Shared Failure-Policy Helpers
 
 **Files:**
-- Modify: `internal/attractor/engine/engine.go`
-- Optionally create helper: `internal/attractor/engine/retry_class_policy.go`
-- Test: `internal/attractor/engine/retry_failure_class_test.go`
+- Modify: `internal/attractor/engine/loop_restart_policy.go`
+- Optionally create: `internal/attractor/engine/failure_policy.go`
+- Test: `internal/attractor/engine/failure_policy_test.go`
 
-**Step 1: Add minimal retry decision helper**
+**Step 1: Add class-gated retry helper in shared policy layer**
 
 ```go
 func shouldRetryOutcome(out runtime.Outcome, failureClass string) bool {
@@ -92,117 +121,192 @@ func shouldRetryOutcome(out runtime.Outcome, failureClass string) bool {
 }
 ```
 
-**Step 2: Gate retry path in `executeWithRetry`**
+**Step 2: Keep fail-closed default for unknown class**
+
+Ensure unknown/empty class defaults to deterministic via existing `normalizedFailureClassOrDefault`.
+
+**Step 3: Run tests to verify green**
+
+Run:
+
+```bash
+out="$(go test ./internal/attractor/engine -run '^TestFailurePolicy_NormalizeFailureClass$|^TestFailurePolicy_ShouldRetryOutcome_ClassGated$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
+```
+
+Expected: PASS.
+
+**Step 4: Commit**
+
+```bash
+git add internal/attractor/engine/loop_restart_policy.go internal/attractor/engine/failure_policy.go internal/attractor/engine/failure_policy_test.go
+git commit -m "feat(engine): centralize class normalization and retry gating policy"
+```
+
+---
+
+### Task 3: Add Stage Retry-Gating Red Tests
+
+**Files:**
+- Create: `internal/attractor/engine/retry_failure_class_test.go`
+- Reuse helpers: `internal/attractor/engine/engine_test.go`
+
+**Step 1: Add deterministic no-retry test**
 
 ```go
-failureClass := classifyFailureClass(out)
+func TestRun_DeterministicFailure_DoesNotRetry(t *testing.T) {
+    // Handler returns StatusFail + Meta.failure_class=deterministic.
+    // Graph default_max_retry=3.
+    // Expect exactly one stage_attempt_end for node and zero stage_retry_sleep events.
+}
+```
+
+**Step 2: Add transient retry test**
+
+```go
+func TestRun_TransientFailure_StillRetries(t *testing.T) {
+    // Attempt1: StatusFail + Meta.failure_class=transient_infra.
+    // Attempt2: success.
+    // Expect at least one stage_retry_sleep and eventual success.
+}
+```
+
+**Step 3: Run tests to verify red**
+
+Run:
+
+```bash
+out="$(go test ./internal/attractor/engine -run '^TestRun_DeterministicFailure_DoesNotRetry$|^TestRun_TransientFailure_StillRetries$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
+```
+
+Expected: FAIL before retry-loop wiring.
+
+**Step 4: Commit failing tests**
+
+```bash
+git add internal/attractor/engine/retry_failure_class_test.go
+git commit -m "test(engine): reproduce missing class-gated stage retry behavior"
+```
+
+---
+
+### Task 4: Gate `executeWithRetry` By Shared Failure Policy
+
+**Files:**
+- Modify: `internal/attractor/engine/engine.go`
+- Test: `internal/attractor/engine/retry_failure_class_test.go`
+- Regressions: `internal/attractor/engine/retry_policy_test.go`, `internal/attractor/engine/retry_on_retry_status_test.go`
+
+**Step 1: Use source-classified failure class when available**
+
+In retry loop:
+
+```go
+failureClass := classifyFailureClass(out) // respects Meta/ContextUpdates hints first
 if attempt < maxAttempts && shouldRetryOutcome(out, failureClass) {
-    // existing backoff + sleep path
+    // existing sleep path
 } else if attempt < maxAttempts {
     e.appendProgress(map[string]any{
-        "event": "stage_retry_blocked",
-        "node_id": node.ID,
-        "failure_class": normalizedFailureClassOrDefault(failureClass),
-        "status": string(out.Status),
+        "event":           "stage_retry_blocked",
+        "node_id":         node.ID,
+        "status":          string(out.Status),
+        "failure_class":   normalizedFailureClassOrDefault(failureClass),
+        "failure_reason":  out.FailureReason,
+        "attempt":         attempt,
+        "max":             maxAttempts,
     })
     break
 }
 ```
 
-**Step 3: Run task tests to verify green**
+**Step 2: Preserve existing allow-partial and terminal-fail semantics**
 
-Run:
+Do not change end-of-loop status canonicalization behavior.
+
+**Step 3: Run focused tests**
 
 ```bash
-go test ./internal/attractor/engine -run 'TestRun_DeterministicFailure_DoesNotRetry|TestRun_TransientFailure_StillRetries' -count=1
+go test ./internal/attractor/engine -run '^TestRun_DeterministicFailure_DoesNotRetry$|^TestRun_TransientFailure_StillRetries$|^TestRun_RetriesOnFail_ThenSucceeds$|^TestRun_RetriesOnRetryStatus$|^TestRun_AllowPartialAfterRetryExhaustion$' -count=1
 ```
 
 Expected: PASS.
 
-**Step 4: Run nearby retry tests**
-
-Run:
+**Step 4: Commit**
 
 ```bash
-go test ./internal/attractor/engine -run 'TestRun_RetriesOnFail_ThenSucceeds|TestRun_RetriesOnRetryStatus|TestRun_AllowPartialAfterRetryExhaustion' -count=1
-```
-
-Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add internal/attractor/engine/engine.go internal/attractor/engine/retry_class_policy.go internal/attractor/engine/retry_failure_class_test.go
-git commit -m "fix(engine): gate stage retries by normalized failure_class"
+git add internal/attractor/engine/engine.go internal/attractor/engine/retry_failure_class_test.go
+git commit -m "fix(engine): apply class-gated retry policy in executeWithRetry"
 ```
 
 ---
 
-### Task 3: Add Failing Tests For Provider CLI Error Classification
+### Task 5: Add Provider CLI Error-Classification Red Tests
 
 **Files:**
 - Create: `internal/attractor/engine/provider_error_classification_test.go`
-- Modify test fixture usage as needed: `internal/attractor/engine/codergen_process_test.go`
-- Test: `internal/attractor/engine/provider_error_classification_test.go`
+- Reuse: `internal/attractor/engine/codergen_process_test.go`
 
-**Step 1: Add Anthropic contract mismatch classification test**
+**Step 1: Add Anthropic contract mismatch classifier test**
 
 ```go
 func TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose(t *testing.T) {
     stderr := "Error: When using --print, --output-format=stream-json requires --verbose"
     got := classifyProviderCLIError("anthropic", stderr, errors.New("exit status 1"))
-    // expect class deterministic + stable signature for provider_contract
+    // Expect deterministic + stable provider_contract signature.
 }
 ```
 
-**Step 2: Add Gemini model-not-found classification test**
+**Step 2: Add Gemini model-not-found classifier test**
 
 ```go
 func TestClassifyProviderCLIError_GeminiModelNotFound(t *testing.T) {
     stderr := "ModelNotFoundError: Requested entity was not found."
     got := classifyProviderCLIError("google", stderr, errors.New("exit status 1"))
-    // expect class deterministic + signature provider_model_unavailable
+    // Expect deterministic + provider_model_unavailable signature.
 }
 ```
 
-**Step 3: Add Codex idle-timeout classification test**
+**Step 3: Add Codex idle-timeout classifier test using runErr signal**
 
 ```go
-func TestClassifyProviderCLIError_CodexIdleTimeout(t *testing.T) {
-    stderr := "codex idle timeout after 2m0s with no output"
-    got := classifyProviderCLIError("openai", stderr, errors.New("exit status 1"))
-    // expect class transient_infra
+func TestClassifyProviderCLIError_CodexIdleTimeout_RunErrSignal(t *testing.T) {
+    runErr := errors.New("codex idle timeout after 2m0s with no output")
+    got := classifyProviderCLIError("openai", "", runErr)
+    // Expect transient_infra.
 }
 ```
 
 **Step 4: Run tests to verify red**
 
-Run:
-
 ```bash
-go test ./internal/attractor/engine -run 'TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose|TestClassifyProviderCLIError_GeminiModelNotFound|TestClassifyProviderCLIError_CodexIdleTimeout' -count=1
+out="$(go test ./internal/attractor/engine -run '^TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose$|^TestClassifyProviderCLIError_GeminiModelNotFound$|^TestClassifyProviderCLIError_CodexIdleTimeout_RunErrSignal$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
 ```
 
-Expected: FAIL (classifier does not exist yet).
+Expected: FAIL before classifier implementation.
 
 **Step 5: Commit failing tests**
 
 ```bash
 git add internal/attractor/engine/provider_error_classification_test.go
-git commit -m "test(engine): reproduce missing provider CLI error class mapping"
+git commit -m "test(engine): reproduce missing provider CLI failure classification"
 ```
 
 ---
 
-### Task 4: Implement Provider Error Envelope And Anthropic Invocation Fix
+### Task 6: Implement Provider Classifier + Source-Level Outcome Metadata
 
 **Files:**
 - Create: `internal/attractor/engine/provider_error_classification.go`
 - Modify: `internal/attractor/engine/codergen_router.go`
+- Modify: `internal/attractor/engine/codergen_cli_invocation_test.go`
 - Test: `internal/attractor/engine/provider_error_classification_test.go`
-- Test: `internal/attractor/engine/codergen_cli_invocation_test.go`
 
-**Step 1: Implement provider classifier**
+**Step 1: Implement deterministic-first provider classifier**
 
 ```go
 type providerCLIClassifiedError struct {
@@ -212,13 +316,15 @@ type providerCLIClassifiedError struct {
 }
 
 func classifyProviderCLIError(provider string, stderr string, runErr error) providerCLIClassifiedError {
-    // provider-specific deterministic signatures first
-    // fallback to transient timeout/network hints
-    // final fallback deterministic
+    // 1) Provider-specific deterministic signatures (contract/model unavailable)
+    // 2) Transient infra hints (timeouts/network/429/5xx)
+    // 3) Fallback deterministic
 }
 ```
 
-**Step 2: Attach class/signature to CLI failure outcomes in `runCLI`**
+**Step 2: Attach class/signature where CLI failures are produced**
+
+In `runCLI`, when returning failure outcomes for CLI execution failure:
 
 ```go
 classified := classifyProviderCLIError(providerKey, string(stderrBytes), runErr)
@@ -235,7 +341,7 @@ return outStr, &runtime.Outcome{
 }, nil
 ```
 
-**Step 3: Fix Anthropic CLI invocation contract**
+**Step 3: Fix Anthropic default CLI invocation contract**
 
 ```go
 case "anthropic":
@@ -243,133 +349,21 @@ case "anthropic":
     args = []string{"-p", "--output-format", "stream-json", "--verbose", "--model", modelID}
 ```
 
-**Step 4: Run tests for green**
+**Step 4: Add/adjust invocation tests**
 
-Run:
-
-```bash
-go test ./internal/attractor/engine -run 'TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose|TestClassifyProviderCLIError_GeminiModelNotFound|TestClassifyProviderCLIError_CodexIdleTimeout|TestBuildCodexIsolatedEnv_UsesAbsoluteStateRoot' -count=1
-```
-
-Expected: PASS.
-
-**Step 5: Commit**
-
-```bash
-git add internal/attractor/engine/provider_error_classification.go internal/attractor/engine/codergen_router.go internal/attractor/engine/provider_error_classification_test.go internal/attractor/engine/codergen_cli_invocation_test.go
-git commit -m "feat(engine): classify provider CLI failures and fix anthropic stream-json invocation"
-```
-
----
-
-### Task 5: Add Failing Tests For Provider CLI Preflight + Report Artifact
-
-**Files:**
-- Modify: `internal/attractor/engine/provider_preflight_test.go`
-- Modify: `internal/attractor/engine/run_with_config_integration_test.go`
-- Test: `internal/attractor/engine/provider_preflight_test.go`
-
-**Step 1: Add failing test for missing CLI binary**
+Add test:
 
 ```go
-func TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing(t *testing.T) {
-    // cfg: anthropic backend=cli
-    // env: KILROY_CLAUDE_PATH=/nonexistent/claude
-    // expect deterministic preflight error before cxdb health/stage execution
+func TestDefaultCLIInvocation_AnthropicIncludesVerboseForStreamJSON(t *testing.T) {
+    _, args := defaultCLIInvocation("anthropic", "claude-opus", "/tmp/worktree")
+    if !hasArg(args, "--verbose") { t.Fatalf("...") }
 }
 ```
 
-**Step 2: Add failing test for Anthropic required flag contract**
-
-```go
-func TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag(t *testing.T) {
-    // fake claude binary prints help without "--verbose"
-    // expect preflight deterministic provider_contract failure
-}
-```
-
-**Step 3: Add failing test for `preflight_report.json` persistence**
-
-```go
-func TestRunWithConfig_WritesPreflightReport_Always(t *testing.T) {
-    // run one preflight pass and one preflight fail case
-    // assert logs_root/preflight_report.json exists in both
-}
-```
-
-**Step 4: Run tests to verify red**
-
-Run:
+**Step 5: Run focused tests**
 
 ```bash
-go test ./internal/attractor/engine -run 'TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing|TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag|TestRunWithConfig_WritesPreflightReport_Always' -count=1
-```
-
-Expected: FAIL (`RunWithConfig` currently has no CLI capability preflight/report artifact).
-
-**Step 5: Commit failing tests**
-
-```bash
-git add internal/attractor/engine/provider_preflight_test.go internal/attractor/engine/run_with_config_integration_test.go
-git commit -m "test(engine): reproduce missing provider CLI preflight and report artifact"
-```
-
----
-
-### Task 6: Implement Deterministic CLI Preflight + Persist `preflight_report.json`
-
-**Files:**
-- Modify: `internal/attractor/engine/run_with_config.go`
-- Create: `internal/attractor/engine/provider_preflight.go`
-- Modify: `internal/attractor/engine/codergen_router.go` (reuse invocation contract constants/helpers)
-- Test: `internal/attractor/engine/provider_preflight_test.go`
-
-**Step 1: Add report model and write helper**
-
-```go
-type preflightReport struct {
-    Timestamp string                 `json:"timestamp"`
-    Checks    []map[string]any       `json:"checks"`
-    Summary   map[string]any         `json:"summary"`
-}
-```
-
-Persist to `filepath.Join(opts.LogsRoot, "preflight_report.json")` before returning from preflight path (pass and fail).
-
-**Step 2: Add deterministic CLI capability checks**
-
-```go
-func preflightCLIProvider(provider, exe string, required []string) error {
-    // LookPath(exe)
-    // run: <exe> --help
-    // assert required flags/subcommands present in help text
-}
-```
-
-Required checks:
-
-1. Anthropic: `-p`, `--output-format`, `--verbose`, `--model`
-2. Gemini: `-p`, `--output-format`, `--yolo`, `--model`
-3. Codex: `exec`, `--json`, `-m`
-
-**Step 3: Execute preflight before CXDB health and stage execution**
-
-In `RunWithConfig`, after catalog load and provider/model validation, run provider CLI preflight and write the report artifact.
-
-**Step 4: Return class-aware deterministic errors**
-
-Format errors with stable prefix:
-
-```go
-return nil, fmt.Errorf("preflight[deterministic]: provider=%s check=%s: %w", provider, checkName, err)
-```
-
-**Step 5: Run tests to verify green**
-
-Run:
-
-```bash
-go test ./internal/attractor/engine -run 'TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing|TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag|TestRunWithConfig_WritesPreflightReport_Always|TestRunWithConfig_FailsFast_WhenCLIModelNotInCatalogForProvider' -count=1
+go test ./internal/attractor/engine -run '^TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose$|^TestClassifyProviderCLIError_GeminiModelNotFound$|^TestClassifyProviderCLIError_CodexIdleTimeout_RunErrSignal$|^TestDefaultCLIInvocation_AnthropicIncludesVerboseForStreamJSON$|^TestCodexCLIInvocation_StateRootIsAbsolute$' -count=1
 ```
 
 Expected: PASS.
@@ -377,103 +371,194 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add internal/attractor/engine/run_with_config.go internal/attractor/engine/provider_preflight.go internal/attractor/engine/codergen_router.go internal/attractor/engine/provider_preflight_test.go internal/attractor/engine/run_with_config_integration_test.go
-git commit -m "feat(engine): add deterministic provider CLI preflight with persisted report"
+git add internal/attractor/engine/provider_error_classification.go internal/attractor/engine/codergen_router.go internal/attractor/engine/provider_error_classification_test.go internal/attractor/engine/codergen_cli_invocation_test.go
+git commit -m "feat(engine): classify provider CLI failures at source and fix anthropic invocation contract"
 ```
 
 ---
 
-### Task 7: Add Fan-In Aggregate Failure Classification To Prevent Blind Join Retries
+### Task 7: Add Deterministic Provider CLI Preflight + `preflight_report.json`
+
+**Files:**
+- Create: `internal/attractor/engine/provider_preflight.go`
+- Modify: `internal/attractor/engine/run_with_config.go`
+- Modify: `internal/attractor/engine/provider_preflight_test.go`
+- Optionally modify: `internal/attractor/engine/run_with_config_integration_test.go`
+
+**Step 1: Add preflight red tests (binary missing, contract mismatch, report always written)**
+
+```go
+func TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing(t *testing.T) {}
+func TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag(t *testing.T) {}
+func TestRunWithConfig_WritesPreflightReport_Always(t *testing.T) {}
+```
+
+Test fixtures must ensure provider/model pairs are valid in catalog when testing CLI binary/contract checks (to avoid failing earlier in model validation).
+
+**Step 2: Run tests to verify red**
+
+```bash
+out="$(go test ./internal/attractor/engine -run '^TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing$|^TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag$|^TestRunWithConfig_WritesPreflightReport_Always$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
+```
+
+Expected: FAIL before preflight implementation.
+
+**Step 3: Implement preflight model + writer (always writes)**
+
+```go
+type preflightReport struct {
+    Timestamp string           `json:"timestamp"`
+    Checks    []preflightCheck `json:"checks"`
+    Summary   preflightSummary `json:"summary"`
+}
+```
+
+In `RunWithConfig`:
+
+1. After `opts.applyDefaults()`, create logs root (`os.MkdirAll(opts.LogsRoot, 0o755)`).
+2. Execute CLI preflight before CXDB `Health` and before stage execution.
+3. Use deferred finalization to persist `preflight_report.json` on both pass and fail paths.
+
+**Step 4: Implement provider-specific capability checks using real invocation path**
+
+- Preflight only providers used by graph nodes with `backend=cli`.
+- Required command checks:
+  1. OpenAI: `<codex_exe> exec --help` includes `--json` and `-m`.
+  2. Anthropic: `<claude_exe> --help` includes `-p`, `--output-format`, `--verbose`, `--model`.
+  3. Google: `<gemini_exe> --help` includes `-p`, `--output-format`, `--yolo`, `--model`.
+
+**Step 5: Return deterministic, class-aware preflight errors**
+
+```go
+return fmt.Errorf("preflight[deterministic]: provider=%s check=%s: %w", provider, checkName, err)
+```
+
+**Step 6: Run focused tests**
+
+```bash
+go test ./internal/attractor/engine -run '^TestRunWithConfig_PreflightFails_WhenProviderCLIBinaryMissing$|^TestRunWithConfig_PreflightFails_WhenAnthropicHelpMissingVerboseFlag$|^TestRunWithConfig_WritesPreflightReport_Always$|^TestRunWithConfig_FailsFast_WhenCLIModelNotInCatalogForProvider$' -count=1
+```
+
+Expected: PASS.
+
+**Step 7: Commit**
+
+```bash
+git add internal/attractor/engine/provider_preflight.go internal/attractor/engine/run_with_config.go internal/attractor/engine/provider_preflight_test.go internal/attractor/engine/run_with_config_integration_test.go
+git commit -m "feat(engine): add deterministic provider CLI preflight and always-persisted preflight report"
+```
+
+---
+
+### Task 8: Add Fan-In Aggregate Failure Classification
 
 **Files:**
 - Modify: `internal/attractor/engine/parallel_handlers.go`
 - Modify: `internal/attractor/engine/parallel_guardrails_test.go`
-- Optionally add: `internal/attractor/engine/fanin_failure_class_test.go`
+- Create: `internal/attractor/engine/fanin_failure_class_test.go`
 
-**Step 1: Add failing fan-in classification tests**
+**Step 1: Add fan-in classification red tests**
 
 ```go
-func TestFanIn_AllParallelBranchesFail_DeterministicClass(t *testing.T) {
-    // parallel.results with all branch outcomes fail + failure_class=deterministic
-    // expect fan-in outcome fail with Meta.failure_class=deterministic
-}
-
-func TestFanIn_AllParallelBranchesFail_TransientClass(t *testing.T) {
-    // one branch failure_class=transient_infra
-    // expect fan-in failure_class=transient_infra
-}
+func TestFanIn_AllParallelBranchesFail_DeterministicClass(t *testing.T) {}
+func TestFanIn_AllParallelBranchesFail_TransientClass(t *testing.T) {}
 ```
+
+Rules:
+
+1. If all branches fail and any branch is `transient_infra`, aggregate class is `transient_infra`.
+2. Otherwise aggregate class is `deterministic`.
 
 **Step 2: Run tests to verify red**
 
-Run:
-
 ```bash
-go test ./internal/attractor/engine -run 'TestFanIn_AllParallelBranchesFail_DeterministicClass|TestFanIn_AllParallelBranchesFail_TransientClass' -count=1
+out="$(go test ./internal/attractor/engine -run '^TestFanIn_AllParallelBranchesFail_DeterministicClass$|^TestFanIn_AllParallelBranchesFail_TransientClass$' -count=1 2>&1)"
+printf '%s\n' "$out"
+! grep -q '\[no tests to run\]' <<<"$out"
 ```
 
-Expected: FAIL (fan-in currently returns unclassified `"all parallel branches failed"`).
+Expected: FAIL before fan-in metadata implementation.
 
 **Step 3: Implement aggregate classification in `FanInHandler.Execute`**
 
 ```go
-// when no winner
-failureClass := aggregateBranchFailureClass(results) // deterministic unless any transient
-return runtime.Outcome{
-    Status:        runtime.StatusFail,
-    FailureReason: "all parallel branches failed",
-    Meta: map[string]any{
-        "failure_class":     failureClass,
-        "failure_signature": "parallel_all_failed|" + failureClass,
-    },
-    ContextUpdates: map[string]any{"failure_class": failureClass},
-}, nil
+if !okWinner {
+    cls := aggregateBranchFailureClass(results)
+    return runtime.Outcome{
+        Status:        runtime.StatusFail,
+        FailureReason: "all parallel branches failed",
+        Meta: map[string]any{
+            "failure_class":     cls,
+            "failure_signature": "parallel_all_failed|" + cls,
+        },
+        ContextUpdates: map[string]any{"failure_class": cls},
+    }, nil
+}
 ```
 
-**Step 4: Run tests to verify green**
-
-Run:
+**Step 4: Run focused tests**
 
 ```bash
-go test ./internal/attractor/engine -run 'TestFanIn_AllParallelBranchesFail_DeterministicClass|TestFanIn_AllParallelBranchesFail_TransientClass|TestRun_DeterministicFailure_DoesNotRetry' -count=1
+go test ./internal/attractor/engine -run '^TestFanIn_AllParallelBranchesFail_DeterministicClass$|^TestFanIn_AllParallelBranchesFail_TransientClass$|^TestRun_DeterministicFailure_DoesNotRetry$' -count=1
 ```
 
-Expected: PASS; deterministic fan-in outcomes no longer burn retry budget after Task 2.
+Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add internal/attractor/engine/parallel_handlers.go internal/attractor/engine/parallel_guardrails_test.go internal/attractor/engine/fanin_failure_class_test.go
-git commit -m "fix(engine): classify fan-in aggregate failures for retry gating"
+git add internal/attractor/engine/parallel_handlers.go internal/attractor/engine/fanin_failure_class_test.go internal/attractor/engine/parallel_guardrails_test.go
+git commit -m "fix(engine): classify all-fail fan-in outcomes for downstream retry gating"
 ```
 
 ---
 
-### Task 8: Update Runbook + Guardrail Matrix, Then Run Full Gate
+### Task 9: Harden Guardrail Matrix + Update Runbook + Run Full Gate
 
 **Files:**
-- Modify: `docs/strongdm/attractor/README.md`
 - Modify: `scripts/e2e-guardrail-matrix.sh`
+- Modify: `docs/strongdm/attractor/README.md`
 
-**Step 1: Update runbook semantics**
+**Step 1: Harden guardrail script against false-pass test selection**
+
+In script, add a helper that fails on `[no tests to run]` for targeted test commands:
+
+```bash
+run_test_checked() {
+  local label="$1"
+  shift
+  echo "$label"
+  local out
+  out="$($@ 2>&1)"
+  printf '%s\n' "$out"
+  if grep -q '\[no tests to run\]' <<<"$out"; then
+    echo "guardrail matrix: FAIL (no tests executed)"
+    exit 1
+  fi
+}
+```
+
+**Step 2: Extend matrix with new reliability checks**
+
+Add targeted checks for:
+
+1. `TestRun_DeterministicFailure_DoesNotRetry`
+2. `TestFanIn_AllParallelBranchesFail_DeterministicClass`
+3. `TestRunWithConfig_WritesPreflightReport_Always`
+4. `TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose`
+
+**Step 3: Update runbook semantics**
 
 Document:
 
-1. Stage retries are class-gated (`transient_infra` only by default).
-2. Provider CLI preflight is deterministic and writes `preflight_report.json`.
-3. Fan-in deterministic all-fail outcomes no longer retry blindly.
+1. Stage retry is class-gated (`transient_infra` retries by default).
+2. Provider CLI failures are source-classified with `failure_class`/`failure_signature`.
+3. Deterministic CLI preflight runs before CXDB and writes `preflight_report.json` on pass/fail.
+4. Fan-in all-fail outcomes carry aggregated failure class.
 
-**Step 2: Extend guardrail script**
-
-Add a fourth check that runs new deterministic retry-gating tests:
-
-```bash
-go test ./internal/attractor/engine -run 'TestRun_DeterministicFailure_DoesNotRetry|TestFanIn_AllParallelBranchesFail_DeterministicClass' -count=1
-```
-
-**Step 3: Run full verification gate**
-
-Run:
+**Step 4: Run full verification gate**
 
 ```bash
 go test ./cmd/kilroy -count=1
@@ -485,34 +570,28 @@ bash scripts/e2e-guardrail-matrix.sh
 
 Expected: all PASS.
 
-**Step 4: Optional real-run acceptance check**
-
-Run a detached real scenario and verify:
-
-1. Deterministic provider contract/model failures fail fast in preflight when possible.
-2. Deterministic stage failures do not consume full retry budget.
-3. `final.json` includes explicit deterministic failure reason and CXDB IDs.
-
 **Step 5: Commit**
 
 ```bash
-git add docs/strongdm/attractor/README.md scripts/e2e-guardrail-matrix.sh
-git commit -m "docs+tests: codify class-gated retries and provider preflight guardrails"
+git add scripts/e2e-guardrail-matrix.sh docs/strongdm/attractor/README.md
+git commit -m "docs+tests: enforce class-gated reliability contracts and no-false-pass targeted test gates"
 ```
 
 ---
 
 ## Required Green Exit Criteria
 
-The branch is complete only when all of the following are true:
+Branch is complete only when all are true:
 
-1. New failure-class retry gating tests are green.
-2. New provider classifier + preflight tests are green.
-3. Existing baseline suites remain green:
+1. Shared failure-policy tests are green.
+2. Stage retry-gating tests are green and emit `stage_retry_blocked` for deterministic failures.
+3. Provider classifier tests are green and `runCLI` attaches `failure_class` + `failure_signature` on CLI failures.
+4. Preflight tests are green, and `RunWithConfig` writes `preflight_report.json` in both pass/fail preflight paths.
+5. Fan-in all-fail classification tests are green and fan-in emits class/signature metadata.
+6. Baseline suites remain green:
    - `go test ./cmd/kilroy -count=1`
    - `go test ./internal/attractor/runtime -count=1`
    - `go test ./internal/attractor/engine -count=1`
    - `go test ./internal/llm/providers/... -count=1`
-4. `bash scripts/e2e-guardrail-matrix.sh` passes with new class-gating coverage.
-5. `preflight_report.json` is present for `RunWithConfig` runs (pass and fail paths).
+7. `bash scripts/e2e-guardrail-matrix.sh` passes and fails fast if any targeted test command runs zero tests.
 
