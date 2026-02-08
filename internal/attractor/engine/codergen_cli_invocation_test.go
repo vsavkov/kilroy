@@ -1,6 +1,11 @@
 package engine
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestDefaultCLIInvocation_GoogleGeminiNonInteractive(t *testing.T) {
 	exe, args := defaultCLIInvocation("google", "gemini-3-flash-preview", "/tmp/worktree")
@@ -38,4 +43,58 @@ func TestDefaultCLIInvocation_OpenAI_DoesNotUseDeprecatedAskForApproval(t *testi
 	if !hasArg(args, "--json") {
 		t.Fatalf("expected --json: %v", args)
 	}
+}
+
+func TestBuildCodexIsolatedEnv_ConfiguresCodexScopedOverrides(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte(`{"token":"x"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(`model = "gpt-5"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	stageDir := t.TempDir()
+	env, meta, err := buildCodexIsolatedEnv(stageDir)
+	if err != nil {
+		t.Fatalf("buildCodexIsolatedEnv: %v", err)
+	}
+
+	stateRoot := strings.TrimSpace(anyToString(meta["state_root"]))
+	wantStateRoot := filepath.Join(stageDir, "codex-home", ".codex")
+	if stateRoot != wantStateRoot {
+		t.Fatalf("state_root: got %q want %q", stateRoot, wantStateRoot)
+	}
+	if got := envLookup(env, "HOME"); got != filepath.Join(stageDir, "codex-home") {
+		t.Fatalf("HOME: got %q", got)
+	}
+	if got := envLookup(env, "CODEX_HOME"); got != wantStateRoot {
+		t.Fatalf("CODEX_HOME: got %q want %q", got, wantStateRoot)
+	}
+	if got := envLookup(env, "XDG_CONFIG_HOME"); got != filepath.Join(stageDir, "codex-home", ".config") {
+		t.Fatalf("XDG_CONFIG_HOME: got %q", got)
+	}
+	if got := envLookup(env, "XDG_DATA_HOME"); got != filepath.Join(stageDir, "codex-home", ".local", "share") {
+		t.Fatalf("XDG_DATA_HOME: got %q", got)
+	}
+	if got := envLookup(env, "XDG_STATE_HOME"); got != filepath.Join(stageDir, "codex-home", ".local", "state") {
+		t.Fatalf("XDG_STATE_HOME: got %q", got)
+	}
+
+	assertExists(t, filepath.Join(wantStateRoot, "auth.json"))
+	assertExists(t, filepath.Join(wantStateRoot, "config.toml"))
+}
+
+func envLookup(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }

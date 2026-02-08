@@ -18,9 +18,12 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
 - OpenAI codex CLI invocation:
   - Default args use `codex exec --json --sandbox workspace-write ...`.
   - Deprecated `--ask-for-approval` is intentionally not used.
+  - Attractor isolates Codex runtime state per stage (`env_mode=isolated`, `env_scope=codex`, stage-local `state_root`).
+  - Idle watchdog enforces process-group cleanup for stalled Codex CLI stages.
 - Codex schema behavior:
   - Structured output schema is strict (`required: ["final","summary"]`, `additionalProperties: false`).
   - If codex rejects schema validation (`invalid_json_schema`-class errors), Attractor retries once without `--output-schema` and records fallback metadata in stage artifacts.
+  - If codex emits known state-db discrepancy signatures, Attractor retries once with a fresh isolated state root and records state-db fallback metadata.
 - Loop safety:
   - Use `loop_restart=true` on retry-loop edges that jump back to earlier stages.
   - Set graph-level `max_restarts` to bound cycle count and prevent unbounded runs.
