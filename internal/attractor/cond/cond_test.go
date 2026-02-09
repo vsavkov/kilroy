@@ -36,3 +36,28 @@ func TestEvaluate(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluate_CustomOutcome(t *testing.T) {
+	// Custom outcome values used in reference dotfiles (semport.dot: outcome=process, outcome=done).
+	ctx := runtime.NewContext()
+	out := runtime.Outcome{Status: runtime.StageStatus("process")}
+
+	cases := []struct {
+		cond string
+		want bool
+	}{
+		{"outcome=process", true},
+		{"outcome=done", false},
+		{"outcome!=process", false},
+		{"outcome!=done", true},
+	}
+	for _, tc := range cases {
+		got, err := Evaluate(tc.cond, out, ctx)
+		if err != nil {
+			t.Fatalf("Evaluate(%q) error: %v", tc.cond, err)
+		}
+		if got != tc.want {
+			t.Fatalf("Evaluate(%q)=%v, want %v", tc.cond, got, tc.want)
+		}
+	}
+}

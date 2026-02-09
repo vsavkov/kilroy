@@ -30,8 +30,49 @@ func TestParseStageStatus_CanonicalAndLegacy(t *testing.T) {
 			t.Fatalf("ParseStageStatus(%q)=%q want %q", tc.in, got, tc.want)
 		}
 	}
-	if _, err := ParseStageStatus("not-a-status"); err == nil {
-		t.Fatalf("expected error for invalid status")
+}
+
+func TestParseStageStatus_CustomOutcomes(t *testing.T) {
+	// Custom outcome values used in reference dotfiles (semport.dot, consensus_task.dot).
+	cases := []struct {
+		in   string
+		want StageStatus
+	}{
+		{"process", StageStatus("process")},
+		{"done", StageStatus("done")},
+		{"port", StageStatus("port")},
+		{"needs_dod", StageStatus("needs_dod")},
+		{"has_dod", StageStatus("has_dod")},
+		{"yes", StageStatus("yes")},
+		{"PROCESS", StageStatus("process")}, // normalized to lowercase
+	}
+	for _, tc := range cases {
+		got, err := ParseStageStatus(tc.in)
+		if err != nil {
+			t.Fatalf("ParseStageStatus(%q) error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("ParseStageStatus(%q)=%q want %q", tc.in, got, tc.want)
+		}
+	}
+	// Empty string is still an error.
+	if _, err := ParseStageStatus(""); err == nil {
+		t.Fatalf("expected error for empty status")
+	}
+	if _, err := ParseStageStatus("  "); err == nil {
+		t.Fatalf("expected error for whitespace-only status")
+	}
+}
+
+func TestStageStatus_IsCanonical(t *testing.T) {
+	if !StatusSuccess.IsCanonical() {
+		t.Fatalf("StatusSuccess should be canonical")
+	}
+	if !StatusFail.IsCanonical() {
+		t.Fatalf("StatusFail should be canonical")
+	}
+	if StageStatus("process").IsCanonical() {
+		t.Fatalf("custom status 'process' should not be canonical")
 	}
 }
 
@@ -73,6 +114,31 @@ func TestDecodeOutcomeJSON_AcceptsCanonicalAndLegacyShapes(t *testing.T) {
 	}
 	if o2.ContextUpdates["k"] != "v" {
 		t.Fatalf("legacy context_updates: %+v", o2.ContextUpdates)
+	}
+}
+
+func TestDecodeOutcomeJSON_CustomOutcome_Canonical(t *testing.T) {
+	// Custom outcome via canonical status.json format.
+	o, err := DecodeOutcomeJSON([]byte(`{"status":"process","context_updates":{"decision":"process"}}`))
+	if err != nil {
+		t.Fatalf("DecodeOutcomeJSON custom canonical: %v", err)
+	}
+	if o.Status != StageStatus("process") {
+		t.Fatalf("expected status 'process', got %q", o.Status)
+	}
+	if o.ContextUpdates["decision"] != "process" {
+		t.Fatalf("expected context_updates preserved, got %+v", o.ContextUpdates)
+	}
+}
+
+func TestDecodeOutcomeJSON_CustomOutcome_Legacy(t *testing.T) {
+	// Custom outcome via legacy format.
+	o, err := DecodeOutcomeJSON([]byte(`{"outcome":"done","notes":"all features complete"}`))
+	if err != nil {
+		t.Fatalf("DecodeOutcomeJSON custom legacy: %v", err)
+	}
+	if o.Status != StageStatus("done") {
+		t.Fatalf("expected status 'done', got %q", o.Status)
 	}
 }
 

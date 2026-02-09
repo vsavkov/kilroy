@@ -41,13 +41,31 @@ func ParseStageStatus(s string) (StageStatus, error) {
 	case "SKIPPED":
 		return StatusSkipped, nil
 	default:
-		return "", fmt.Errorf("invalid stage status: %q", s)
+		// Custom outcome values (e.g. "process", "done", "port") are used
+		// in reference dotfiles (semport.dot, consensus_task.dot) for
+		// multi-way conditional routing. Pass them through as-is.
+		normalized := strings.ToLower(strings.TrimSpace(s))
+		if normalized == "" {
+			return "", fmt.Errorf("invalid stage status: empty string")
+		}
+		return StageStatus(normalized), nil
 	}
 }
 
 func (s StageStatus) Valid() bool {
 	_, err := ParseStageStatus(string(s))
 	return err == nil
+}
+
+// IsCanonical returns true if the status is one of the five canonical values
+// (success, partial_success, retry, fail, skipped) rather than a custom routing value.
+func (s StageStatus) IsCanonical() bool {
+	switch s {
+	case StatusSuccess, StatusPartialSuccess, StatusRetry, StatusFail, StatusSkipped:
+		return true
+	default:
+		return false
+	}
 }
 
 type Outcome struct {
