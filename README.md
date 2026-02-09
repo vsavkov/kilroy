@@ -120,6 +120,7 @@ cxdb:
       url: "http://127.0.0.1:9020"
 
 llm:
+  cli_profile: real
   providers:
     openai:
       backend: cli
@@ -148,8 +149,26 @@ Important:
 
 ### 5) Run the pipeline
 
+Real run (recommended/default profile):
+
 ```bash
+unset KILROY_CODEX_PATH KILROY_CLAUDE_PATH KILROY_GEMINI_PATH
 ./kilroy attractor run --graph pipeline.dot --config run.yaml
+```
+
+Explicit test-shim run (for local fake-provider testing only):
+
+```yaml
+llm:
+  cli_profile: test_shim
+  providers:
+    openai:
+      backend: cli
+      executable: /absolute/path/to/fake-codex
+```
+
+```bash
+./kilroy attractor run --graph pipeline.dot --config run.yaml --allow-test-shim
 ```
 
 On success, stdout includes:
@@ -190,11 +209,11 @@ CLI backend command mappings:
 - `anthropic` -> `claude -p --output-format stream-json ...`
 - `google` -> `gemini -p --output-format stream-json --yolo ...`
 
-Executable overrides:
+Execution policy:
 
-- `KILROY_CODEX_PATH`
-- `KILROY_CLAUDE_PATH`
-- `KILROY_GEMINI_PATH`
+- `llm.cli_profile` defaults to `real`.
+- In `real`, Kilroy uses canonical binaries (`codex`, `claude`, `gemini`) and rejects `KILROY_CODEX_PATH`, `KILROY_CLAUDE_PATH`, `KILROY_GEMINI_PATH`.
+- For fake/shim binaries, set `llm.cli_profile: test_shim`, configure `llm.providers.<provider>.executable`, and run with `--allow-test-shim`.
 
 API backend environment variables:
 
@@ -227,7 +246,7 @@ Typical stage-level artifacts under `{logs_root}/{node_id}`:
 ## Commands
 
 ```text
-kilroy attractor run --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]
+kilroy attractor run [--allow-test-shim] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]
 kilroy attractor resume --logs-root <dir>
 kilroy attractor resume --cxdb <http_base_url> --context-id <id>
 kilroy attractor resume --run-branch <attractor/run/...> [--repo <path>]

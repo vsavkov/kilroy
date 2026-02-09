@@ -20,6 +20,7 @@ cat > "$RUN_ROOT/run_config.json" <<JSON
     "http_base_url": "http://127.0.0.1:9010"
   },
   "llm": {
+    "cli_profile": "real",
     "providers": {
       "anthropic": { "backend": "cli" },
       "google": { "backend": "cli" },
@@ -46,6 +47,37 @@ JSON
   --config "$RUN_ROOT/run_config.json" \
   --run-id "$RUN_ID" \
   --logs-root "$RUN_ROOT/logs"
+```
+
+Before real runs, clear shim overrides:
+
+```bash
+unset KILROY_CODEX_PATH KILROY_CLAUDE_PATH KILROY_GEMINI_PATH
+```
+
+## Explicit Test-Shim Run (Fake Provider CLIs)
+
+Use this only for deterministic local tests with fake provider binaries.
+
+```json
+"llm": {
+  "cli_profile": "test_shim",
+  "providers": {
+    "openai": {
+      "backend": "cli",
+      "executable": "/absolute/path/to/fake-codex"
+    }
+  }
+}
+```
+
+```bash
+./kilroy attractor run \
+  --graph "$RUN_ROOT/repo/demo/dttf/dttf.dot" \
+  --config "$RUN_ROOT/run_config_test_shim.json" \
+  --allow-test-shim \
+  --run-id "$RUN_ID-test-shim" \
+  --logs-root "$RUN_ROOT/logs-test-shim"
 ```
 
 Wait for terminal status:

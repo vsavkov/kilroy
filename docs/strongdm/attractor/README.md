@@ -41,6 +41,14 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
   - Always writes `<logs_root>/preflight_report.json` (pass/warn/fail checks and summary).
   - `KILROY_PREFLIGHT_STRICT_CAPABILITIES=1` turns capability-probe failures into hard preflight failures.
   - `KILROY_PREFLIGHT_CAPABILITY_PROBES=off` disables capability probing and keeps binary-presence checks only.
+- Real vs test-shim execution:
+  - `llm.cli_profile` defaults to `real` and rejects `KILROY_CODEX_PATH`, `KILROY_CLAUDE_PATH`, `KILROY_GEMINI_PATH` overrides.
+  - Test-shim mode requires both `llm.cli_profile: test_shim` and per-provider `executable` config.
+  - Operators must pass `--allow-test-shim` for test-shim runs; without it, run preflight fails fast.
+  - Real run command:
+    - `unset KILROY_CODEX_PATH KILROY_CLAUDE_PATH KILROY_GEMINI_PATH && ./kilroy attractor run --graph <graph.dot> --config <run.yaml>`
+  - Test-shim run command:
+    - `./kilroy attractor run --graph <graph.dot> --config <run.yaml> --allow-test-shim`
 - Fan-in all-fail behavior:
   - When all parallel branches are `status=fail`, fan-in emits `failure_class` + `failure_signature` on the aggregate fail outcome.
   - Deterministic precedence is fail-closed: any deterministic/unknown branch class makes aggregate deterministic.
