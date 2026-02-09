@@ -138,6 +138,15 @@ func TestNormalizeProviderKey_GeminiMapsToGoogle(t *testing.T) {
 	}
 }
 
+func TestNormalizeProviderKey_DelegatesToProviderSpecAliases(t *testing.T) {
+	if got := normalizeProviderKey("z-ai"); got != "zai" {
+		t.Fatalf("normalizeProviderKey(z-ai)=%q want zai", got)
+	}
+	if got := normalizeProviderKey("moonshot"); got != "kimi" {
+		t.Fatalf("normalizeProviderKey(moonshot)=%q want kimi", got)
+	}
+}
+
 func TestLoadRunConfigFile_CXDBAutostartDefaultsAndTrim(t *testing.T) {
 	dir := t.TempDir()
 	yml := filepath.Join(dir, "run.yaml")

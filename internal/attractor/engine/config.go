@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/strongdm/kilroy/internal/providerspec"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -230,13 +232,7 @@ func validateConfig(cfg *RunConfigFile) error {
 }
 
 func normalizeProviderKey(k string) string {
-	k = strings.ToLower(strings.TrimSpace(k))
-	switch k {
-	case "gemini":
-		return "google"
-	default:
-		return k
-	}
+	return providerspec.CanonicalProviderKey(k)
 }
 
 func trimNonEmpty(parts []string) []string {
