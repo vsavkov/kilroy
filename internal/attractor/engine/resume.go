@@ -30,11 +30,6 @@ type manifest struct {
 		OpenRouterModelInfoPath   string `json:"openrouter_model_info_path"`
 		OpenRouterModelInfoSHA256 string `json:"openrouter_model_info_sha256"`
 		OpenRouterModelInfoSource string `json:"openrouter_model_info_source"`
-
-		// Deprecated compatibility fields.
-		LiteLLMCatalogPath   string `json:"litellm_catalog_path"`
-		LiteLLMCatalogSHA256 string `json:"litellm_catalog_sha256"`
-		LiteLLMCatalogSource string `json:"litellm_catalog_source"`
 	} `json:"modeldb"`
 
 	CXDB struct {
@@ -141,16 +136,9 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 	var startup *CXDBStartupInfo
 	if cfg != nil {
 		// Resume MUST use the run's snapshotted catalog.
-		// Path selection order:
-		// 1) manifest.modeldb.openrouter_model_info_path
-		// 2) logs_root/modeldb/openrouter_models.json
-		// 3) manifest.modeldb.litellm_catalog_path (legacy)
-		// 4) logs_root/modeldb/litellm_catalog.json (legacy)
 		snapshotPath := firstExistingPath(
 			strings.TrimSpace(m.ModelDB.OpenRouterModelInfoPath),
 			filepath.Join(logsRoot, "modeldb", "openrouter_models.json"),
-			strings.TrimSpace(m.ModelDB.LiteLLMCatalogPath),
-			filepath.Join(logsRoot, "modeldb", "litellm_catalog.json"),
 		)
 		if strings.TrimSpace(snapshotPath) == "" {
 			return nil, fmt.Errorf("resume: missing per-run model catalog snapshot: %s", filepath.Join(logsRoot, "modeldb", "openrouter_models.json"))
@@ -228,10 +216,7 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 		}
 		return catalog.SHA256
 	}()
-	eng.ModelCatalogSource = firstNonEmpty(
-		m.ModelDB.OpenRouterModelInfoSource,
-		m.ModelDB.LiteLLMCatalogSource,
-	)
+	eng.ModelCatalogSource = strings.TrimSpace(m.ModelDB.OpenRouterModelInfoSource)
 	eng.ModelCatalogPath = func() string {
 		if catalog == nil {
 			return ""

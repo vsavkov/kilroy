@@ -46,8 +46,8 @@ func TestRunWithConfig_RealProfileRejectsShimOverrideE2E(t *testing.T) {
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = writePinnedCatalog(t)
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = writePinnedCatalog(t)
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 
 	dot := []byte(`
 digraph G {
@@ -81,8 +81,8 @@ func TestRunWithConfig_TestShimRequiresExplicitGateAndExecutable(t *testing.T) {
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI, Executable: codexCLI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = writePinnedCatalog(t)
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = writePinnedCatalog(t)
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 
 	dot := []byte(`
 digraph G {
@@ -184,8 +184,8 @@ echo '{"type":"done","text":"ok"}'
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI, Executable: cli},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`
@@ -278,9 +278,6 @@ digraph G {
 	if strings.TrimSpace(anyToString(modeldbInfo["openrouter_model_info_path"])) == "" {
 		t.Fatalf("manifest missing modeldb.openrouter_model_info_path: %v", manifest["modeldb"])
 	}
-	if strings.TrimSpace(anyToString(modeldbInfo["litellm_catalog_path"])) == "" {
-		t.Fatalf("manifest missing compatibility modeldb.litellm_catalog_path: %v", manifest["modeldb"])
-	}
 
 	turns := cxdbSrv.Turns(ctxID)
 	if len(turns) == 0 {
@@ -296,7 +293,6 @@ digraph G {
 		"checkpoint.json":                true,
 		"final.json":                     true,
 		"modeldb/openrouter_models.json": true,
-		"modeldb/litellm_catalog.json":   true,
 		"prompt.md":                      true,
 		"response.md":                    true,
 		"status.json":                    true,
@@ -413,8 +409,8 @@ func TestRunWithConfig_APIBackend_AgentLoop_WritesAgentEventsAndPassesReasoningE
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`
@@ -478,8 +474,8 @@ func TestRunWithConfig_APIBackend_OneShot_WritesRequestAndResponseArtifacts(t *t
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`
@@ -544,8 +540,8 @@ func TestRunWithConfig_APIBackend_ForceModelOverride_UsesForcedModel(t *testing.
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`
@@ -612,8 +608,8 @@ func TestRunWithConfig_APIBackend_AutoStatusFalse_FailsWhenNoStatusWritten(t *te
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`

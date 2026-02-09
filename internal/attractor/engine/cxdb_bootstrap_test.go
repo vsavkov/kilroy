@@ -18,7 +18,7 @@ func TestEnsureCXDBReady_GivesAutostartGuidance(t *testing.T) {
 	cfg.Version = 1
 	cfg.CXDB.BinaryAddr = "127.0.0.1:65530"
 	cfg.CXDB.HTTPBaseURL = "http://127.0.0.1:65531"
-	cfg.ModelDB.LiteLLMCatalogPath = "/tmp/catalog.json"
+	cfg.ModelDB.OpenRouterModelInfoPath = "/tmp/catalog.json"
 	applyConfigDefaults(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -44,7 +44,7 @@ func TestEnsureCXDBReady_StartsUIAndReturnsURL(t *testing.T) {
 	cfg.CXDB.Autostart.UI.Enabled = true
 	cfg.CXDB.Autostart.UI.Command = []string{"sh", "-c", "printf ready > \"$KILROY_LOGS_ROOT/ui-marker.txt\""}
 	cfg.CXDB.Autostart.UI.URL = "http://127.0.0.1:9020"
-	cfg.ModelDB.LiteLLMCatalogPath = "/tmp/catalog.json"
+	cfg.ModelDB.OpenRouterModelInfoPath = "/tmp/catalog.json"
 	applyConfigDefaults(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -83,7 +83,7 @@ func TestEnsureCXDBReady_AutoDiscoversUIURLFromBase(t *testing.T) {
 	cfg.Version = 1
 	cfg.CXDB.BinaryAddr = cxdbSrv.BinaryAddr()
 	cfg.CXDB.HTTPBaseURL = cxdbSrv.URL()
-	cfg.ModelDB.LiteLLMCatalogPath = "/tmp/catalog.json"
+	cfg.ModelDB.OpenRouterModelInfoPath = "/tmp/catalog.json"
 	applyConfigDefaults(cfg)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -50,8 +50,8 @@ done
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI, Executable: cli},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`

@@ -395,8 +395,8 @@ func writeRunConfigWithCXDBExtras(t *testing.T, repo string, cxdbURL string, cxd
 		sb.WriteString("\n")
 	}
 	sb.WriteString("modeldb:\n")
-	sb.WriteString("  litellm_catalog_path: " + catalogPath + "\n")
-	sb.WriteString("  litellm_catalog_update_policy: pinned\n")
+	sb.WriteString("  openrouter_model_info_path: " + catalogPath + "\n")
+	sb.WriteString("  openrouter_model_info_update_policy: pinned\n")
 	b := []byte(sb.String())
 	_ = os.WriteFile(path, b, 0o644)
 	return path
@@ -578,8 +578,8 @@ llm:
     openai:
       backend: cli
 modeldb:
-  litellm_catalog_path: %s
-  litellm_catalog_update_policy: pinned
+  openrouter_model_info_path: %s
+  openrouter_model_info_update_policy: pinned
 `, repo, catalog)), 0o644)
 
 	logsRoot := filepath.Join(t.TempDir(), "logs")

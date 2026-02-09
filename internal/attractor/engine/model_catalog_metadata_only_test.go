@@ -55,8 +55,8 @@ func TestRunWithConfig_ModelCatalogMetadata_DoesNotAffectProviderRouting_WithFor
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`

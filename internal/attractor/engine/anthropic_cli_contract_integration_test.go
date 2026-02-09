@@ -44,8 +44,8 @@ echo '{"type":"done","text":"ok"}'
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"anthropic": {Backend: BackendCLI, Executable: cli},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = catalog
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = catalog
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := singleProviderDot("anthropic", "claude-sonnet-4-20250514")

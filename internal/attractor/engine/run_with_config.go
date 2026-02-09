@@ -223,15 +223,7 @@ func validateProviderModelPairs(g *model.Graph, cfg *RunConfigFile, catalog *mod
 }
 
 func loadCatalogForRun(path string) (*modeldb.Catalog, error) {
-	cat, err := modeldb.LoadCatalogFromOpenRouterJSON(path)
-	if err == nil {
-		return cat, nil
-	}
-	legacy, legacyErr := modeldb.LoadLegacyLiteLLMCatalog(path)
-	if legacyErr != nil {
-		return nil, fmt.Errorf("load model catalog snapshot %q failed (openrouter=%v, litellm=%v)", path, err, legacyErr)
-	}
-	return catalogFromLiteLLM(legacy), nil
+	return modeldb.LoadCatalogFromOpenRouterJSON(path)
 }
 
 func modelIDForNode(n *model.Node) string {
@@ -244,61 +236,6 @@ func modelIDForNode(n *model.Node) string {
 		modelID = strings.TrimSpace(n.Attr("model", ""))
 	}
 	return modelID
-}
-
-func catalogFromLiteLLM(legacy *modeldb.LiteLLMCatalog) *modeldb.Catalog {
-	if legacy == nil {
-		return nil
-	}
-	out := &modeldb.Catalog{
-		Path:   legacy.Path,
-		SHA256: legacy.SHA256,
-		Models: make(map[string]modeldb.ModelEntry, len(legacy.Models)),
-	}
-	for id, m := range legacy.Models {
-		ctx := parseCatalogInt(m.MaxInputTokens)
-		if ctx == 0 {
-			ctx = parseCatalogInt(m.MaxTokens)
-		}
-		maxOutVal := parseCatalogInt(m.MaxOutputTokens)
-		if maxOutVal == 0 {
-			maxOutVal = parseCatalogInt(m.MaxTokens)
-		}
-		var maxOut *int
-		if maxOutVal > 0 {
-			v := maxOutVal
-			maxOut = &v
-		}
-		out.Models[id] = modeldb.ModelEntry{
-			Provider:           m.LiteLLMProvider,
-			Mode:               m.Mode,
-			ContextWindow:      ctx,
-			MaxOutputTokens:    maxOut,
-			InputCostPerToken:  m.InputCostPerToken,
-			OutputCostPerToken: m.OutputCostPerToken,
-		}
-	}
-	return out
-}
-
-func parseCatalogInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int32:
-		return int(x)
-	case int64:
-		return int(x)
-	case float32:
-		return int(x)
-	case float64:
-		return int(x)
-	case string:
-		n, _ := strconv.Atoi(strings.TrimSpace(x))
-		return n
-	default:
-		return 0
-	}
 }
 
 func createContextWithFallback(ctx context.Context, client *cxdb.Client, bin *cxdb.BinaryClient) (cxdb.ContextInfo, error) {

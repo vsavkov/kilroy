@@ -154,8 +154,8 @@ func TestRunWithConfig_ForceModel_BypassesCatalogGate(t *testing.T) {
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendAPI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = catalog
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = catalog
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := singleProviderDot("openai", "gpt-5.3-codex")
@@ -548,8 +548,8 @@ func testPreflightConfigForProviders(repo string, catalog string, providers map[
 	for provider, backend := range providers {
 		cfg.LLM.Providers[provider] = ProviderConfig{Backend: backend}
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = catalog
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = catalog
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 	return cfg
 }

@@ -135,8 +135,8 @@ func testOpenAICLIConfig(repo string, pinned string, cxdbSrv *cxdbTestServer, co
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI, Executable: codexCLI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 	return cfg
 }

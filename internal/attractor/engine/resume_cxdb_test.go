@@ -35,8 +35,8 @@ func TestResumeFromCXDB_FindsLogsRootFromTurns(t *testing.T) {
 	cfg.CXDB.HTTPBaseURL = cxdbSrv.URL()
 	cfg.LLM.CLIProfile = "test_shim"
 	cfg.LLM.Providers = map[string]ProviderConfig{"openai": {Backend: BackendCLI, Executable: cli}}
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	dot := []byte(`

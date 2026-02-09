@@ -23,7 +23,7 @@ llm:
     openai:
       backend: api
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ modeldb:
   "repo": {"path": "/tmp/repo"},
   "cxdb": {"binary_addr": "127.0.0.1:9009", "http_base_url": "http://127.0.0.1:9010"},
   "llm": {"providers": {"anthropic": {"backend": "cli"}}},
-  "modeldb": {"litellm_catalog_path": "/tmp/catalog.json"}
+  "modeldb": {"openrouter_model_info_path": "/tmp/catalog.json"}
 }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -86,46 +86,11 @@ modeldb:
 	if got, want := cfg.ModelDB.OpenRouterModelInfoPath, "/tmp/openrouter.json"; got != want {
 		t.Fatalf("openrouter_model_info_path=%q want %q", got, want)
 	}
-	if got, want := cfg.ModelDB.LiteLLMCatalogPath, "/tmp/openrouter.json"; got != want {
-		t.Fatalf("deprecated litellm_catalog_path backfill=%q want %q", got, want)
-	}
 	if got, want := cfg.ModelDB.OpenRouterModelInfoUpdatePolicy, "pinned"; got != want {
 		t.Fatalf("openrouter_model_info_update_policy=%q want %q", got, want)
 	}
 	if got, want := cfg.ModelDB.OpenRouterModelInfoFetchTimeoutMS, 3456; got != want {
 		t.Fatalf("openrouter_model_info_fetch_timeout_ms=%d want %d", got, want)
-	}
-}
-
-func TestLoadRunConfigFile_ModelDBLiteLLMKeysStillAccepted(t *testing.T) {
-	dir := t.TempDir()
-	yml := filepath.Join(dir, "run.yaml")
-	if err := os.WriteFile(yml, []byte(`
-version: 1
-repo:
-  path: /tmp/repo
-cxdb:
-  binary_addr: 127.0.0.1:9009
-  http_base_url: http://127.0.0.1:9010
-llm:
-  providers:
-    openai:
-      backend: api
-modeldb:
-  litellm_catalog_path: /tmp/litellm.json
-  litellm_catalog_update_policy: pinned
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadRunConfigFile(yml)
-	if err != nil {
-		t.Fatalf("LoadRunConfigFile(yaml): %v", err)
-	}
-	if got, want := cfg.ModelDB.OpenRouterModelInfoPath, "/tmp/litellm.json"; got != want {
-		t.Fatalf("openrouter_model_info_path backfill=%q want %q", got, want)
-	}
-	if got, want := cfg.ModelDB.OpenRouterModelInfoUpdatePolicy, "pinned"; got != want {
-		t.Fatalf("openrouter_model_info_update_policy backfill=%q want %q", got, want)
 	}
 }
 
@@ -156,7 +121,7 @@ llm:
     openai:
       backend: api
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +160,7 @@ llm:
     openai:
       backend: api
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +187,7 @@ llm:
     openai:
       backend: api
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +215,7 @@ llm:
     openai:
       backend: cli
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +244,7 @@ llm:
     openai:
       backend: cli
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +274,7 @@ llm:
       backend: cli
       executable: /tmp/fake/codex
 modeldb:
-  litellm_catalog_path: /tmp/catalog.json
+  openrouter_model_info_path: /tmp/catalog.json
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

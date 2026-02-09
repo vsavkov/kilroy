@@ -25,7 +25,7 @@ digraph G {
 	cfg.Repo.Path = "/tmp/repo"
 	cfg.CXDB.BinaryAddr = "127.0.0.1:9009"
 	cfg.CXDB.HTTPBaseURL = "http://127.0.0.1:9010"
-	cfg.ModelDB.LiteLLMCatalogPath = "/tmp/catalog.json"
+	cfg.ModelDB.OpenRouterModelInfoPath = "/tmp/catalog.json"
 	// Intentionally omit llm.providers.openai.backend
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -55,8 +55,8 @@ digraph G {
 	cfg.CXDB.BinaryAddr = cxdbSrv.BinaryAddr()
 	cfg.CXDB.HTTPBaseURL = cxdbSrv.URL()
 	cfg.CXDB.Autostart.UI.URL = "http://127.0.0.1:9020"
-	cfg.ModelDB.LiteLLMCatalogPath = pinned
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = pinned
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -81,8 +81,8 @@ func TestRunWithConfig_RejectsTestShimWithoutAllowFlag(t *testing.T) {
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI, Executable: "/tmp/fake/codex"},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = writePinnedCatalog(t)
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = writePinnedCatalog(t)
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 
 	dot := []byte(`
 digraph G {
@@ -115,8 +115,8 @@ func TestRunWithConfig_RejectsRealProfileWhenProviderPathEnvIsSet(t *testing.T) 
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = writePinnedCatalog(t)
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = writePinnedCatalog(t)
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 
 	dot := []byte(`
 digraph G {
@@ -154,8 +154,8 @@ func TestRunWithConfig_ProfilePolicyFailure_WritesPreflightReport(t *testing.T) 
 	cfg.LLM.Providers = map[string]ProviderConfig{
 		"openai": {Backend: BackendCLI},
 	}
-	cfg.ModelDB.LiteLLMCatalogPath = writePinnedCatalog(t)
-	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.ModelDB.OpenRouterModelInfoPath = writePinnedCatalog(t)
+	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 
 	dot := []byte(`
 digraph G {

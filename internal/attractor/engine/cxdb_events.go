@@ -36,13 +36,8 @@ func (e *Engine) cxdbRunStarted(ctx context.Context, baseSHA string) error {
 		_, _ = e.CXDB.PutArtifactFile(ctx, "", "run_config.json", filepath.Join(e.LogsRoot, "run_config.json"))
 	}
 	openrouterCatalogPath := filepath.Join(e.LogsRoot, "modeldb", "openrouter_models.json")
-	legacyCatalogPath := filepath.Join(e.LogsRoot, "modeldb", "litellm_catalog.json")
 	if _, err := os.Stat(openrouterCatalogPath); err == nil {
 		_, _ = e.CXDB.PutArtifactFile(ctx, "", "modeldb/openrouter_models.json", openrouterCatalogPath)
-		// Deprecated compatibility artifact name for one release.
-		_, _ = e.CXDB.PutArtifactFile(ctx, "", "modeldb/litellm_catalog.json", openrouterCatalogPath)
-	} else if _, err := os.Stat(legacyCatalogPath); err == nil {
-		_, _ = e.CXDB.PutArtifactFile(ctx, "", "modeldb/litellm_catalog.json", legacyCatalogPath)
 	}
 	if _, err := os.Stat(filepath.Join(e.LogsRoot, "graph.dot")); err == nil {
 		_, _ = e.CXDB.PutArtifactFile(ctx, "", "graph.dot", filepath.Join(e.LogsRoot, "graph.dot"))

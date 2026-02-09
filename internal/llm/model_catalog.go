@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/strongdm/kilroy/internal/modelmeta"
@@ -201,136 +200,7 @@ func LoadModelCatalogFromOpenRouterJSON(path string) (*ModelCatalog, error) {
 	return &ModelCatalog{Models: models}, nil
 }
 
-// Deprecated: use LoadModelCatalogFromOpenRouterJSON.
-func LoadModelCatalogFromLiteLLMJSON(path string) (*ModelCatalog, error) {
-	cat, err := LoadModelCatalogFromOpenRouterJSON(path)
-	if err == nil {
-		return cat, nil
-	}
-	legacy, legacyErr := loadModelCatalogFromLiteLLMJSONLegacy(path)
-	if legacyErr != nil {
-		return nil, fmt.Errorf("load model catalog %q failed (openrouter=%v, litellm=%v)", path, err, legacyErr)
-	}
-	return legacy, nil
-}
 
-func loadModelCatalogFromLiteLLMJSONLegacy(path string) (*ModelCatalog, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var raw map[string]map[string]any
-	dec := json.NewDecoder(strings.NewReader(string(b)))
-	dec.UseNumber()
-	if err := dec.Decode(&raw); err != nil {
-		return nil, err
-	}
-	if len(raw) == 0 {
-		return nil, fmt.Errorf("litellm catalog is empty: %s", path)
-	}
-
-	var models []ModelInfo
-	for id, v := range raw {
-		if id == "sample_spec" {
-			continue
-		}
-		mode, _ := v["mode"].(string)
-		if strings.TrimSpace(mode) != "" && strings.TrimSpace(mode) != "chat" {
-			continue
-		}
-
-		prov := modelmeta.NormalizeProvider(fmt.Sprint(v["litellm_provider"]))
-		ctxWindow := parseIntAny(v["max_input_tokens"])
-		if ctxWindow == 0 {
-			ctxWindow = parseIntAny(v["max_tokens"])
-		}
-		maxOut := parseIntAny(v["max_output_tokens"])
-		if maxOut == 0 {
-			maxOut = parseIntAny(v["max_tokens"])
-		}
-		var maxOutPtr *int
-		if maxOut > 0 {
-			maxOutPtr = &maxOut
-		}
-
-		inCost := parseFloatAny(v["input_cost_per_token"])
-		outCost := parseFloatAny(v["output_cost_per_token"])
-		inPerM := scalePerMillion(inCost)
-		outPerM := scalePerMillion(outCost)
-
-		models = append(models, ModelInfo{
-			ID:                   id,
-			Provider:             prov,
-			DisplayName:          id,
-			ContextWindow:        ctxWindow,
-			MaxOutputTokens:      maxOutPtr,
-			SupportsTools:        parseBoolAny(v["supports_function_calling"]),
-			SupportsVision:       parseBoolAny(v["supports_vision"]),
-			SupportsReasoning:    parseBoolAny(v["supports_reasoning"]),
-			InputCostPerMillion:  inPerM,
-			OutputCostPerMillion: outPerM,
-			Aliases:              nil,
-		})
-	}
-
-	sort.Slice(models, func(i, j int) bool {
-		if models[i].Provider != models[j].Provider {
-			return models[i].Provider < models[j].Provider
-		}
-		return models[i].ID < models[j].ID
-	})
-	return &ModelCatalog{Models: models}, nil
-}
-
-func parseIntAny(v any) int {
-	switch x := v.(type) {
-	case json.Number:
-		n, _ := x.Int64()
-		return int(n)
-	case float64:
-		return int(x)
-	case int:
-		return x
-	case string:
-		n, _ := strconv.Atoi(strings.TrimSpace(x))
-		return n
-	default:
-		return 0
-	}
-}
-
-func parseBoolAny(v any) bool {
-	switch x := v.(type) {
-	case bool:
-		return x
-	case string:
-		b, _ := strconv.ParseBool(strings.TrimSpace(x))
-		return b
-	default:
-		return false
-	}
-}
-
-func parseFloatAny(v any) *float64 {
-	switch x := v.(type) {
-	case json.Number:
-		f, err := x.Float64()
-		if err != nil {
-			return nil
-		}
-		return &f
-	case float64:
-		return &x
-	case int:
-		f := float64(x)
-		return &f
-	case string:
-		return modelmeta.ParseFloatStringPtr(x)
-	default:
-		return nil
-	}
-}
 
 func scalePerMillion(perToken *float64) *float64 {
 	if perToken == nil {
