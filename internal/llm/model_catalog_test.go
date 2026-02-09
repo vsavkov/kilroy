@@ -128,3 +128,48 @@ func TestLoadModelCatalogFromLiteLLMJSON_CompatibilityWrapper_GetListLatest(t *t
 		t.Fatalf("expected no google reasoning model in sample catalog; got %+v", latestReasoning)
 	}
 }
+
+func TestLoadModelCatalogFromLiteLLMJSON_CompatibilityWrapper_AcceptsLegacyFormat(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "catalog.json")
+	body := `{
+  "sample_spec": {"litellm_provider":"openai","mode":"chat"},
+  "gpt-5.2": {
+    "litellm_provider":"openai","mode":"chat",
+    "max_input_tokens":1000,"max_output_tokens":2000,
+    "input_cost_per_token":0.000001,"output_cost_per_token":0.000002,
+    "supports_function_calling":true,"supports_vision":true,"supports_reasoning":true
+  },
+  "gpt-5.2-mini": {
+    "litellm_provider":"openai","mode":"chat",
+    "max_input_tokens":500,"max_output_tokens":1000,
+    "supports_function_calling":true
+  },
+  "claude-opus-4-6": {
+    "litellm_provider":"anthropic","mode":"chat",
+    "max_input_tokens":"200000","max_output_tokens":"8192",
+    "supports_function_calling":true,"supports_vision":true,"supports_reasoning":true
+  },
+  "gemini-3-flash-preview": {
+    "litellm_provider":"gemini","mode":"chat",
+    "max_input_tokens":1000000,"max_output_tokens":8192,
+    "supports_function_calling":true,"supports_vision":true
+  },
+  "text-embedding-3-large": {
+    "litellm_provider":"openai","mode":"embedding","max_input_tokens":8191
+  }
+}`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadModelCatalogFromLiteLLMJSON(p)
+	if err != nil {
+		t.Fatalf("LoadModelCatalogFromLiteLLMJSON: %v", err)
+	}
+	if got, want := len(c.Models), 4; got != want {
+		t.Fatalf("models: got %d want %d", got, want)
+	}
+	if c.GetModelInfo("gpt-5.2") == nil {
+		t.Fatalf("expected gpt-5.2 model")
+	}
+}

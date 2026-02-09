@@ -1,6 +1,8 @@
 .ai/
 /.worktrees/
-kilroy
+# Root build artifacts.
+/kilroy
+/kilroy.exe
 /restart-*/
 /internal/attractor/engine/cli_wrote.txt
 /internal/attractor/engine/status.json

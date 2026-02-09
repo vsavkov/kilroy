@@ -16,10 +16,10 @@ func TestRunWithConfig_ModelCatalogIsMetadataOnly_DoesNotAffectProviderRouting(t
 	repo := initTestRepo(t)
 	logsRoot := t.TempDir()
 
-	// Deliberately provide only an Anthropic entry for this model name to ensure
-	// routing is driven by graph/node attributes, not catalog metadata.
+	// Deliberately use unusual metadata values. Routing should still be driven by
+	// graph/node provider settings rather than catalog metadata.
 	pinned := filepath.Join(t.TempDir(), "pinned.json")
-	if err := os.WriteFile(pinned, []byte(`{"data":[{"id":"anthropic/gpt-5.2"}]}`), 0o644); err != nil {
+	if err := os.WriteFile(pinned, []byte(`{"data":[{"id":"openai/gpt-5.2","supported_parameters":[],"context_length":64}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

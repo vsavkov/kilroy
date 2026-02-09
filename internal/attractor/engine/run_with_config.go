@@ -203,15 +203,16 @@ func validateProviderModelPairs(g *model.Graph, cfg *RunConfigFile, catalog *mod
 			continue
 		}
 		provider := normalizeProviderKey(n.Attr("llm_provider", ""))
-		modelID := strings.TrimSpace(n.Attr("llm_model", ""))
+		modelID := modelIDForNode(n)
 		if provider == "" || modelID == "" {
 			continue
 		}
-		if backendFor(cfg, provider) != BackendCLI {
+		backend := backendFor(cfg, provider)
+		if backend != BackendCLI && backend != BackendAPI {
 			continue
 		}
 		if !modeldb.CatalogHasProviderModel(catalog, provider, modelID) {
-			return fmt.Errorf("preflight: llm_provider=%s backend=cli model=%s not present in run catalog", provider, modelID)
+			return fmt.Errorf("preflight: llm_provider=%s backend=%s model=%s not present in run catalog", provider, backend, modelID)
 		}
 	}
 	return nil
@@ -222,11 +223,23 @@ func loadCatalogForRun(path string) (*modeldb.Catalog, error) {
 	if err == nil {
 		return cat, nil
 	}
-	legacy, legacyErr := modeldb.LoadLiteLLMCatalog(path)
+	legacy, legacyErr := modeldb.LoadLegacyLiteLLMCatalog(path)
 	if legacyErr != nil {
 		return nil, fmt.Errorf("load model catalog snapshot %q failed (openrouter=%v, litellm=%v)", path, err, legacyErr)
 	}
 	return catalogFromLiteLLM(legacy), nil
+}
+
+func modelIDForNode(n *model.Node) string {
+	if n == nil {
+		return ""
+	}
+	modelID := strings.TrimSpace(n.Attr("llm_model", ""))
+	if modelID == "" {
+		// Best-effort compatibility with stylesheet examples that use "model".
+		modelID = strings.TrimSpace(n.Attr("model", ""))
+	}
+	return modelID
 }
 
 func catalogFromLiteLLM(legacy *modeldb.LiteLLMCatalog) *modeldb.Catalog {

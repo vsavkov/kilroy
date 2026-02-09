@@ -1,6 +1,10 @@
 package modeldb
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/strongdm/kilroy/internal/modelmeta"
+)
 
 // Catalog is the normalized, provider-agnostic model metadata snapshot used by
 // attractor runtime preflight and routing metadata checks.
@@ -32,7 +36,7 @@ func CatalogHasProviderModel(c *Catalog, provider, modelID string) bool {
 	if c == nil || c.Models == nil {
 		return false
 	}
-	provider = normalizeCatalogProvider(provider)
+	provider = modelmeta.NormalizeProvider(provider)
 	modelID = strings.TrimSpace(modelID)
 	if provider == "" || modelID == "" {
 		return false
@@ -40,7 +44,7 @@ func CatalogHasProviderModel(c *Catalog, provider, modelID string) bool {
 	inCanonical := canonicalModelID(provider, modelID)
 	inRelative := providerRelativeModelID(provider, modelID)
 	for id, entry := range c.Models {
-		entryProvider := normalizeCatalogProvider(entry.Provider)
+		entryProvider := modelmeta.NormalizeProvider(entry.Provider)
 		if entryProvider == "" {
 			entryProvider = inferProviderFromModelID(id)
 		}
@@ -57,16 +61,6 @@ func CatalogHasProviderModel(c *Catalog, provider, modelID string) bool {
 	return false
 }
 
-func normalizeCatalogProvider(p string) string {
-	p = strings.ToLower(strings.TrimSpace(p))
-	switch p {
-	case "gemini":
-		return "google"
-	default:
-		return p
-	}
-}
-
 func inferProviderFromModelID(id string) string {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -76,11 +70,11 @@ func inferProviderFromModelID(id string) string {
 	if len(parts) < 2 {
 		return ""
 	}
-	return normalizeCatalogProvider(parts[0])
+	return modelmeta.NormalizeProvider(parts[0])
 }
 
 func canonicalModelID(provider string, id string) string {
-	provider = normalizeCatalogProvider(provider)
+	provider = modelmeta.NormalizeProvider(provider)
 	rel := providerRelativeModelID(provider, id)
 	if provider == "" || rel == "" {
 		return rel
@@ -89,7 +83,7 @@ func canonicalModelID(provider string, id string) string {
 }
 
 func providerRelativeModelID(provider string, id string) string {
-	provider = normalizeCatalogProvider(provider)
+	provider = modelmeta.NormalizeProvider(provider)
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return ""
@@ -98,7 +92,7 @@ func providerRelativeModelID(provider string, id string) string {
 	if len(parts) == 1 {
 		return id
 	}
-	prefix := normalizeCatalogProvider(parts[0])
+	prefix := modelmeta.NormalizeProvider(parts[0])
 	if prefix == provider {
 		return strings.TrimSpace(strings.Join(parts[1:], "/"))
 	}
@@ -108,7 +102,7 @@ func providerRelativeModelID(provider string, id string) string {
 	}
 	// Legacy LiteLLM keys for Anthropic models may include region prefixes.
 	if provider == "anthropic" {
-		return strings.TrimSpace(parts[len(parts)-1])
+		return strings.TrimSpace(strings.Join(parts[1:], "/"))
 	}
 	return id
 }

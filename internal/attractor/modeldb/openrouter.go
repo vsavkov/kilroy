@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
+
+	"github.com/strongdm/kilroy/internal/modelmeta"
 )
 
 type openRouterPayload struct {
@@ -53,7 +54,7 @@ func LoadCatalogFromOpenRouterJSON(path string) (*Catalog, error) {
 		if id == "" {
 			continue
 		}
-		provider := providerFromOpenRouterID(id)
+		provider := modelmeta.ProviderFromModelID(id)
 		ctxWindow := m.ContextLength
 		if ctxWindow == 0 {
 			ctxWindow = m.TopProvider.ContextLength
@@ -65,15 +66,15 @@ func LoadCatalogFromOpenRouterJSON(path string) (*Catalog, error) {
 		}
 
 		models[id] = ModelEntry{
-			Provider:          provider,
-			Mode:              "chat",
-			ContextWindow:     ctxWindow,
-			MaxOutputTokens:   maxOut,
-			SupportsTools:     stringSliceContainsCI(m.SupportedParameters, "tools"),
-			SupportsReasoning: stringSliceContainsCI(m.SupportedParameters, "reasoning") || stringSliceContainsCI(m.SupportedParameters, "include_reasoning"),
-			SupportsVision:    stringSliceContainsCI(m.Architecture.InputModalities, "image") || stringSliceContainsCI(m.Architecture.OutputModalities, "image"),
-			InputCostPerToken: parseFloatStringPtr(m.Pricing.Prompt),
-			OutputCostPerToken: parseFloatStringPtr(m.Pricing.Completion),
+			Provider:           provider,
+			Mode:               "chat",
+			ContextWindow:      ctxWindow,
+			MaxOutputTokens:    maxOut,
+			SupportsTools:      modelmeta.ContainsFold(m.SupportedParameters, "tools"),
+			SupportsReasoning:  modelmeta.ContainsFold(m.SupportedParameters, "reasoning") || modelmeta.ContainsFold(m.SupportedParameters, "include_reasoning"),
+			SupportsVision:     modelmeta.ContainsFold(m.Architecture.InputModalities, "image") || modelmeta.ContainsFold(m.Architecture.OutputModalities, "image"),
+			InputCostPerToken:  modelmeta.ParseFloatStringPtr(m.Pricing.Prompt),
+			OutputCostPerToken: modelmeta.ParseFloatStringPtr(m.Pricing.Completion),
 		}
 	}
 
@@ -85,38 +86,4 @@ func LoadCatalogFromOpenRouterJSON(path string) (*Catalog, error) {
 		SHA256: sha,
 		Models: models,
 	}, nil
-}
-
-func providerFromOpenRouterID(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ""
-	}
-	parts := strings.SplitN(id, "/", 2)
-	if len(parts) < 2 {
-		return ""
-	}
-	return normalizeCatalogProvider(parts[0])
-}
-
-func stringSliceContainsCI(values []string, target string) bool {
-	target = strings.ToLower(strings.TrimSpace(target))
-	for _, v := range values {
-		if strings.ToLower(strings.TrimSpace(v)) == target {
-			return true
-		}
-	}
-	return false
-}
-
-func parseFloatStringPtr(v string) *float64 {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return nil
-	}
-	return &f
 }

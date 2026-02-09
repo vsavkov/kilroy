@@ -109,6 +109,64 @@ func TestRunWithConfig_FailsFast_WhenCLIModelNotInCatalogForProvider(t *testing.
 	}
 }
 
+func TestRunWithConfig_FailsFast_WhenAPIModelNotInCatalogForProvider(t *testing.T) {
+	repo := initTestRepo(t)
+	catalog := writeCatalogForPreflight(t, `{
+  "anthropic/claude-opus-4-6": {
+    "litellm_provider": "anthropic",
+    "mode": "chat"
+  }
+}`)
+
+	cfg := testPreflightConfigForProviders(repo, catalog, map[string]BackendKind{
+		"openai": BackendAPI,
+	})
+	dot := singleProviderDot("openai", "gpt-5.3-codex")
+
+	logsRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{RunID: "preflight-api-fail", LogsRoot: logsRoot, AllowTestShim: true})
+	if err == nil {
+		t.Fatalf("expected preflight error, got nil")
+	}
+	want := "preflight: llm_provider=openai backend=api model=gpt-5.3-codex not present in run catalog"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected preflight error containing %q, got %v", want, err)
+	}
+	report := mustReadPreflightReport(t, logsRoot)
+	if report.Summary.Fail == 0 {
+		t.Fatalf("expected preflight report with failure summary, got %+v", report.Summary)
+	}
+}
+
+func TestRunWithConfig_UsesModelFallbackAttributeForCatalogValidation(t *testing.T) {
+	repo := initTestRepo(t)
+	catalog := writeCatalogForPreflight(t, `{
+  "gemini/gemini-3-pro-preview": {
+    "litellm_provider": "google",
+    "mode": "chat"
+  }
+}`)
+
+	cfg := testPreflightConfigForProviders(repo, catalog, map[string]BackendKind{
+		"google": BackendCLI,
+	})
+	dot := singleProviderModelAttrDot("google", "gemini-3-pro")
+
+	logsRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{RunID: "preflight-model-attr-fail", LogsRoot: logsRoot, AllowTestShim: true})
+	if err == nil {
+		t.Fatalf("expected preflight error, got nil")
+	}
+	want := "preflight: llm_provider=google backend=cli model=gemini-3-pro not present in run catalog"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected preflight error containing %q, got %v", want, err)
+	}
+}
+
 func TestRunWithConfig_AllowsCLIModel_WhenCatalogHasProviderMatch(t *testing.T) {
 	repo := initTestRepo(t)
 	catalog := writeCatalogForPreflight(t, `{
@@ -432,6 +490,18 @@ digraph G {
   graph [goal="test"]
   start [shape=Mdiamond]
   a [shape=box, llm_provider="%s", llm_model="%s", prompt="x"]
+  exit [shape=Msquare]
+  start -> a -> exit
+}
+`, provider, modelID))
+}
+
+func singleProviderModelAttrDot(provider, modelID string) []byte {
+	return []byte(fmt.Sprintf(`
+digraph G {
+  graph [goal="test"]
+  start [shape=Mdiamond]
+  a [shape=box, llm_provider="%s", model="%s", prompt="x"]
   exit [shape=Msquare]
   start -> a -> exit
 }

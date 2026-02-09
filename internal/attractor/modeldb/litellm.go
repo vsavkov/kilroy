@@ -48,7 +48,7 @@ func LoadLiteLLMCatalog(path string) (*LiteLLMCatalog, error) {
 	}
 	// Temporary fallback for older pinned fixtures that still use the historical
 	// LiteLLM object-map payload format.
-	return loadLegacyLiteLLMCatalog(path)
+	return LoadLegacyLiteLLMCatalog(path)
 }
 
 func catalogToLiteLLMCompat(cat *Catalog) *LiteLLMCatalog {
@@ -74,6 +74,14 @@ func catalogToLiteLLMCompat(cat *Catalog) *LiteLLMCatalog {
 		out.Models[id] = entry
 	}
 	return out
+}
+
+// LoadLegacyLiteLLMCatalog loads the historical LiteLLM object-map payload
+// shape directly.
+//
+// Deprecated: temporary compatibility shim for legacy pinned fixtures.
+func LoadLegacyLiteLLMCatalog(path string) (*LiteLLMCatalog, error) {
+	return loadLegacyLiteLLMCatalog(path)
 }
 
 func loadLegacyLiteLLMCatalog(path string) (*LiteLLMCatalog, error) {
