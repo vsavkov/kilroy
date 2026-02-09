@@ -9,8 +9,8 @@ import (
 	"github.com/strongdm/kilroy/internal/llm"
 	"github.com/strongdm/kilroy/internal/llm/providers/anthropic"
 	"github.com/strongdm/kilroy/internal/llm/providers/google"
-	"github.com/strongdm/kilroy/internal/llm/providers/openaicompat"
 	"github.com/strongdm/kilroy/internal/llm/providers/openai"
+	"github.com/strongdm/kilroy/internal/llm/providers/openaicompat"
 	"github.com/strongdm/kilroy/internal/providerspec"
 )
 
@@ -27,11 +27,11 @@ func newAPIClientFromProviderRuntimes(runtimes map[string]ProviderRuntime) (*llm
 		}
 		switch rt.API.Protocol {
 		case providerspec.ProtocolOpenAIResponses:
-			c.Register(openai.NewWithProvider(key, apiKey, rt.API.DefaultBaseURL))
+			c.Register(openai.NewWithProvider(key, apiKey, resolveBuiltInBaseURLOverride(key, rt.API.DefaultBaseURL)))
 		case providerspec.ProtocolAnthropicMessages:
-			c.Register(anthropic.NewWithProvider(key, apiKey, rt.API.DefaultBaseURL))
+			c.Register(anthropic.NewWithProvider(key, apiKey, resolveBuiltInBaseURLOverride(key, rt.API.DefaultBaseURL)))
 		case providerspec.ProtocolGoogleGenerateContent:
-			c.Register(google.NewWithProvider(key, apiKey, rt.API.DefaultBaseURL))
+			c.Register(google.NewWithProvider(key, apiKey, resolveBuiltInBaseURLOverride(key, rt.API.DefaultBaseURL)))
 		case providerspec.ProtocolOpenAIChatCompletions:
 			c.Register(openaicompat.NewAdapter(openaicompat.Config{
 				Provider:     key,
@@ -47,6 +47,31 @@ func newAPIClientFromProviderRuntimes(runtimes map[string]ProviderRuntime) (*llm
 	}
 	// Empty API clients are valid (for example, CLI-only runs).
 	return c, nil
+}
+
+func resolveBuiltInBaseURLOverride(providerKey, defaultBaseURL string) string {
+	normalized := strings.TrimSpace(defaultBaseURL)
+	switch providerspec.CanonicalProviderKey(providerKey) {
+	case "openai":
+		if env := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")); env != "" {
+			if normalized == "" || normalized == "https://api.openai.com" {
+				return env
+			}
+		}
+	case "anthropic":
+		if env := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); env != "" {
+			if normalized == "" || normalized == "https://api.anthropic.com" {
+				return env
+			}
+		}
+	case "google":
+		if env := strings.TrimSpace(os.Getenv("GEMINI_BASE_URL")); env != "" {
+			if normalized == "" || normalized == "https://generativelanguage.googleapis.com" {
+				return env
+			}
+		}
+	}
+	return normalized
 }
 
 func sortedKeys[V any](m map[string]V) []string {

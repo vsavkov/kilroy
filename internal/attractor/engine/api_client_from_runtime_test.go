@@ -65,3 +65,19 @@ func TestNewAPIClientFromProviderRuntimes_RegistersOpenAICompatByProtocol(t *tes
 		t.Fatalf("expected kimi adapter, got %v", c.ProviderNames())
 	}
 }
+
+func TestResolveBuiltInBaseURLOverride_UsesEnvForBuiltinDefaults(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:9999")
+	got := resolveBuiltInBaseURLOverride("openai", "https://api.openai.com")
+	if got != "http://127.0.0.1:9999" {
+		t.Fatalf("base url override mismatch: %q", got)
+	}
+}
+
+func TestResolveBuiltInBaseURLOverride_DoesNotOverrideExplicitCustomBaseURL(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:9999")
+	got := resolveBuiltInBaseURLOverride("openai", "https://custom.openai.internal")
+	if got != "https://custom.openai.internal" {
+		t.Fatalf("explicit base url should win, got %q", got)
+	}
+}

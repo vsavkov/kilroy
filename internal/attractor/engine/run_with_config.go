@@ -46,6 +46,10 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 			return nil, fmt.Errorf("missing llm.providers.%s.backend (Kilroy forbids implicit backend defaults)", p)
 		}
 	}
+	runtimes, err := resolveProviderRuntimes(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	opts := RunOptions{
 		RepoPath:        cfg.Repo.Path,
@@ -152,7 +156,7 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	eng := newBaseEngine(g, dotSource, opts)
 	eng.RunConfig = cfg
 	eng.Context = NewContextWithGraphAttrs(g)
-	eng.CodergenBackend = NewCodergenRouter(cfg, catalog)
+	eng.CodergenBackend = NewCodergenRouterWithRuntimes(cfg, catalog, runtimes)
 	eng.CXDB = sink
 	eng.ModelCatalogSHA = catalog.SHA256
 	eng.ModelCatalogSource = resolved.Source
