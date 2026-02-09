@@ -64,6 +64,7 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 		opts.RunBranchPrefix = overrides.RunBranchPrefix
 	}
 	opts.AllowTestShim = overrides.AllowTestShim
+	opts.ForceModels = normalizeForceModels(overrides.ForceModels)
 
 	if err := opts.applyDefaults(); err != nil {
 		return nil, err
@@ -101,7 +102,7 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProviderModelPairs(g, cfg, catalog); err != nil {
+	if err := validateProviderModelPairs(g, cfg, catalog, opts); err != nil {
 		report := &providerPreflightReport{
 			GeneratedAt:         time.Now().UTC().Format(time.RFC3339Nano),
 			CLIProfile:          normalizedCLIProfile(cfg),
@@ -193,7 +194,7 @@ func backendFor(cfg *RunConfigFile, provider string) BackendKind {
 	return ""
 }
 
-func validateProviderModelPairs(g *model.Graph, cfg *RunConfigFile, catalog *modeldb.LiteLLMCatalog) error {
+func validateProviderModelPairs(g *model.Graph, cfg *RunConfigFile, catalog *modeldb.LiteLLMCatalog, opts RunOptions) error {
 	if g == nil || cfg == nil || catalog == nil {
 		return nil
 	}
@@ -203,14 +204,22 @@ func validateProviderModelPairs(g *model.Graph, cfg *RunConfigFile, catalog *mod
 		}
 		provider := normalizeProviderKey(n.Attr("llm_provider", ""))
 		modelID := strings.TrimSpace(n.Attr("llm_model", ""))
+		if modelID == "" {
+			// Best-effort compatibility with stylesheet examples that use "model".
+			modelID = strings.TrimSpace(n.Attr("model", ""))
+		}
 		if provider == "" || modelID == "" {
 			continue
 		}
-		if backendFor(cfg, provider) != BackendCLI {
+		backend := backendFor(cfg, provider)
+		if backend != BackendCLI && backend != BackendAPI {
+			continue
+		}
+		if _, forced := forceModelForProvider(opts.ForceModels, provider); forced {
 			continue
 		}
 		if !catalogHasProviderModel(catalog, provider, modelID) {
-			return fmt.Errorf("preflight: llm_provider=%s backend=cli model=%s not present in run catalog", provider, modelID)
+			return fmt.Errorf("preflight: llm_provider=%s backend=%s model=%s not present in run catalog", provider, backend, modelID)
 		}
 	}
 	return nil

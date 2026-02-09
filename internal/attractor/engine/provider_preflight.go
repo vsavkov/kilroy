@@ -169,7 +169,7 @@ func runProviderCLIPreflight(ctx context.Context, g *model.Graph, cfg *RunConfig
 			continue
 		}
 
-		models := usedCLIModelsForProvider(g, cfg, provider)
+		models := usedCLIModelsForProvider(g, cfg, provider, opts)
 		if len(models) == 0 {
 			continue
 		}
@@ -289,10 +289,13 @@ func usedCLIProviders(g *model.Graph, cfg *RunConfigFile) []string {
 	return providers
 }
 
-func usedCLIModelsForProvider(g *model.Graph, cfg *RunConfigFile, provider string) []string {
+func usedCLIModelsForProvider(g *model.Graph, cfg *RunConfigFile, provider string, opts RunOptions) []string {
 	provider = normalizeProviderKey(provider)
 	if provider == "" || g == nil {
 		return nil
+	}
+	if forcedModel, forced := forceModelForProvider(opts.ForceModels, provider); forced {
+		return []string{forcedModel}
 	}
 	seen := map[string]bool{}
 	models := []string{}

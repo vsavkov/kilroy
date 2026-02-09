@@ -90,3 +90,58 @@ func TestCodergenRouter_WithFailoverText_FailsOverToDifferentProvider(t *testing
 		t.Fatalf("used model: got %q want %q", used.Model, "claude-opus-4-6-20260205")
 	}
 }
+
+func TestCodergenRouter_WithFailoverText_AppliesForceModelToFailoverProvider(t *testing.T) {
+	cfg := &RunConfigFile{Version: 1}
+	cfg.LLM.Providers = map[string]ProviderConfig{
+		"openai":    {Backend: BackendAPI},
+		"anthropic": {Backend: BackendAPI},
+	}
+	catalog := &modeldb.LiteLLMCatalog{
+		Models: map[string]modeldb.LiteLLMModelEntry{
+			"us/claude-opus-4-6-20260205": {LiteLLMProvider: "anthropic", Mode: "chat"},
+		},
+	}
+
+	r := NewCodergenRouter(cfg, catalog)
+	client := llm.NewClient()
+	client.Register(&okAdapter{name: "openai"})
+	client.Register(&okAdapter{name: "anthropic"})
+
+	node := &model.Node{ID: "stage-a"}
+	execCtx := &Execution{
+		Engine: &Engine{
+			Options: RunOptions{
+				ForceModels: map[string]string{"anthropic": "claude-force-override"},
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	txt, used, err := r.withFailoverText(ctx, execCtx, node, client, "openai", "gpt-5.2-codex", func(prov string, mid string) (string, error) {
+		if prov == "openai" {
+			return "", fmt.Errorf("synthetic openai failure")
+		}
+		if prov == "anthropic" {
+			if mid != "claude-force-override" {
+				return "", fmt.Errorf("unexpected fallback model: %q", mid)
+			}
+			return "ok-from-anthropic-force", nil
+		}
+		return "", fmt.Errorf("unexpected provider: %q", prov)
+	})
+	if err != nil {
+		t.Fatalf("withFailoverText error: %v", err)
+	}
+	if txt != "ok-from-anthropic-force" {
+		t.Fatalf("text: got %q", txt)
+	}
+	if used.Provider != "anthropic" {
+		t.Fatalf("used provider: got %q want %q", used.Provider, "anthropic")
+	}
+	if used.Model != "claude-force-override" {
+		t.Fatalf("used model: got %q want %q", used.Model, "claude-force-override")
+	}
+}

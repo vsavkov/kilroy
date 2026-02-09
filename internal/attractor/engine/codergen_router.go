@@ -53,6 +53,14 @@ func (r *CodergenRouter) Run(ctx context.Context, exec *Execution, node *model.N
 	if modelID == "" {
 		return "", nil, fmt.Errorf("missing llm_model on node %s", node.ID)
 	}
+	if exec != nil && exec.Engine != nil {
+		if forcedModelID, forced := forceModelForProvider(exec.Engine.Options.ForceModels, prov); forced {
+			if !strings.EqualFold(modelID, forcedModelID) {
+				warnEngine(exec, fmt.Sprintf("force-model override applied: node=%s provider=%s model=%s (was %s)", node.ID, prov, forcedModelID, modelID))
+			}
+			modelID = forcedModelID
+		}
+	}
 	backend := r.backendForProvider(prov)
 	if backend == "" {
 		return "", nil, fmt.Errorf("no backend configured for provider %s", prov)
@@ -241,6 +249,15 @@ func (r *CodergenRouter) withFailoverText(
 ) (string, providerModel, error) {
 	primaryProvider = normalizeProviderKey(primaryProvider)
 	primaryModel = strings.TrimSpace(primaryModel)
+	forceModel := func(provider string) (string, bool) {
+		if execCtx == nil || execCtx.Engine == nil {
+			return "", false
+		}
+		return forceModelForProvider(execCtx.Engine.Options.ForceModels, provider)
+	}
+	if forcedModel, forced := forceModel(primaryProvider); forced {
+		primaryModel = forcedModel
+	}
 
 	available := map[string]bool{}
 	if client != nil {
@@ -261,7 +278,12 @@ func (r *CodergenRouter) withFailoverText(
 		if len(available) > 0 && !available[p] {
 			continue
 		}
-		m := pickFailoverModel(p, r.catalog)
+		m := ""
+		if forcedModel, forced := forceModel(p); forced {
+			m = forcedModel
+		} else {
+			m = pickFailoverModel(p, r.catalog)
+		}
 		if strings.TrimSpace(m) == "" {
 			continue
 		}

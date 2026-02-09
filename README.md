@@ -246,13 +246,15 @@ Typical stage-level artifacts under `{logs_root}/{node_id}`:
 ## Commands
 
 ```text
-kilroy attractor run [--allow-test-shim] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]
+kilroy attractor run [--allow-test-shim] [--force-model <provider=model>] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]
 kilroy attractor resume --logs-root <dir>
 kilroy attractor resume --cxdb <http_base_url> --context-id <id>
 kilroy attractor resume --run-branch <attractor/run/...> [--repo <path>]
 kilroy attractor validate --graph <file.dot>
 kilroy attractor ingest [--output <file.dot>] [--model <model>] [--skill <skill.md>] <requirements>
 ```
+
+`--force-model` can be passed multiple times (for example, `--force-model openai=gpt-5.2-codex --force-model google=gemini-3-pro-preview`) to override node model selection by provider.
 
 Additional ingest flags:
 

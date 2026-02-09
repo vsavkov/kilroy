@@ -20,10 +20,11 @@ import (
 var restartSuffixRE = regexp.MustCompile(`^restart-(\d+)$`)
 
 type manifest struct {
-	RunID         string `json:"run_id"`
-	RepoPath      string `json:"repo_path"`
-	RunBranch     string `json:"run_branch"`
-	RunConfigPath string `json:"run_config_path"`
+	RunID         string            `json:"run_id"`
+	RepoPath      string            `json:"repo_path"`
+	RunBranch     string            `json:"run_branch"`
+	RunConfigPath string            `json:"run_config_path"`
+	ForceModels   map[string]string `json:"force_models"`
 
 	ModelDB struct {
 		LiteLLMCatalogPath   string `json:"litellm_catalog_path"`
@@ -197,6 +198,7 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 		WorktreeDir:     filepath.Join(logsRoot, "worktree"),
 		RunBranchPrefix: prefix,
 		RequireClean:    true,
+		ForceModels:     normalizeForceModels(copyStringStringMap(m.ForceModels)),
 	}
 	if err := opts.applyDefaults(); err != nil {
 		return nil, err

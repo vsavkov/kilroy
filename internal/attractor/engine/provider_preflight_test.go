@@ -109,6 +109,89 @@ func TestRunWithConfig_FailsFast_WhenCLIModelNotInCatalogForProvider(t *testing.
 	}
 }
 
+func TestRunWithConfig_FailsFast_WhenAPIModelNotInCatalogForProvider(t *testing.T) {
+	repo := initTestRepo(t)
+	catalog := writeCatalogForPreflight(t, `{
+  "gpt-5.2": {
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}`)
+
+	cfg := &RunConfigFile{Version: 1}
+	cfg.Repo.Path = repo
+	cfg.CXDB.BinaryAddr = "127.0.0.1:1"
+	cfg.CXDB.HTTPBaseURL = "http://127.0.0.1:1"
+	cfg.LLM.CLIProfile = "real"
+	cfg.LLM.Providers = map[string]ProviderConfig{
+		"openai": {Backend: BackendAPI},
+	}
+	cfg.ModelDB.LiteLLMCatalogPath = catalog
+	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.Git.RunBranchPrefix = "attractor/run"
+
+	dot := singleProviderDot("openai", "gpt-5.3-codex")
+
+	logsRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{RunID: "preflight-api-fail", LogsRoot: logsRoot})
+	if err == nil {
+		t.Fatalf("expected preflight error, got nil")
+	}
+	want := "preflight: llm_provider=openai backend=api model=gpt-5.3-codex not present in run catalog"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected preflight error containing %q, got %v", want, err)
+	}
+	report := mustReadPreflightReport(t, logsRoot)
+	if report.Summary.Fail == 0 {
+		t.Fatalf("expected preflight report with failure summary, got %+v", report.Summary)
+	}
+}
+
+func TestRunWithConfig_ForceModel_BypassesCatalogGate(t *testing.T) {
+	repo := initTestRepo(t)
+	catalog := writeCatalogForPreflight(t, `{
+  "gpt-5.2": {
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}`)
+
+	cfg := &RunConfigFile{Version: 1}
+	cfg.Repo.Path = repo
+	cfg.CXDB.BinaryAddr = "127.0.0.1:1"
+	cfg.CXDB.HTTPBaseURL = "http://127.0.0.1:1"
+	cfg.LLM.CLIProfile = "real"
+	cfg.LLM.Providers = map[string]ProviderConfig{
+		"openai": {Backend: BackendAPI},
+	}
+	cfg.ModelDB.LiteLLMCatalogPath = catalog
+	cfg.ModelDB.LiteLLMCatalogUpdatePolicy = "pinned"
+	cfg.Git.RunBranchPrefix = "attractor/run"
+
+	dot := singleProviderDot("openai", "gpt-5.3-codex")
+
+	logsRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{
+		RunID:       "preflight-force-model-bypass",
+		LogsRoot:    logsRoot,
+		ForceModels: map[string]string{"openai": "gpt-5.3-codex"},
+	})
+	if err == nil {
+		t.Fatalf("expected downstream cxdb error, got nil")
+	}
+	if strings.Contains(err.Error(), "preflight: llm_provider=openai backend=api model=gpt-5.3-codex not present in run catalog") {
+		t.Fatalf("force-model should bypass provider/model catalog gate, got %v", err)
+	}
+	report := mustReadPreflightReport(t, logsRoot)
+	if report.Summary.Fail != 0 {
+		t.Fatalf("expected no preflight failures with force-model, got %+v", report.Summary)
+	}
+}
+
 func TestRunWithConfig_AllowsCLIModel_WhenCatalogHasProviderMatch(t *testing.T) {
 	repo := initTestRepo(t)
 	catalog := writeCatalogForPreflight(t, `{

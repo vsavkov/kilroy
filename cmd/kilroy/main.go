@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/strongdm/kilroy/internal/attractor/engine"
 )
@@ -26,7 +28,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  kilroy attractor run [--detach] [--allow-test-shim] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]")
+	fmt.Fprintln(os.Stderr, "  kilroy attractor run [--detach] [--allow-test-shim] [--force-model <provider=model>] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --logs-root <dir>")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --cxdb <http_base_url> --context-id <id>")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --run-branch <attractor/run/...> [--repo <path>]")
@@ -61,6 +63,7 @@ func attractorRun(args []string) {
 	var logsRoot string
 	var detach bool
 	var allowTestShim bool
+	var forceModelSpecs []string
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -68,6 +71,13 @@ func attractorRun(args []string) {
 			detach = true
 		case "--allow-test-shim":
 			allowTestShim = true
+		case "--force-model":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(os.Stderr, "--force-model requires a value in the form provider=model")
+				os.Exit(1)
+			}
+			forceModelSpecs = append(forceModelSpecs, args[i])
 		case "--graph":
 			i++
 			if i >= len(args) {
@@ -106,6 +116,11 @@ func attractorRun(args []string) {
 		usage()
 		os.Exit(1)
 	}
+	forceModels, canonicalForceSpecs, err := parseForceModelFlags(forceModelSpecs)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	if detach {
 		if runID == "" {
@@ -135,6 +150,9 @@ func attractorRun(args []string) {
 		if allowTestShim {
 			childArgs = append(childArgs, "--allow-test-shim")
 		}
+		for _, spec := range canonicalForceSpecs {
+			childArgs = append(childArgs, "--force-model", spec)
+		}
 
 		if err := launchDetached(childArgs, logsRoot); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -162,6 +180,7 @@ func attractorRun(args []string) {
 		RunID:         runID,
 		LogsRoot:      logsRoot,
 		AllowTestShim: allowTestShim,
+		ForceModels:   forceModels,
 		OnCXDBStartup: func(info *engine.CXDBStartupInfo) {
 			if info == nil {
 				return
@@ -196,6 +215,55 @@ func attractorRun(args []string) {
 		os.Exit(0)
 	}
 	os.Exit(1)
+}
+
+func parseForceModelFlags(specs []string) (map[string]string, []string, error) {
+	if len(specs) == 0 {
+		return nil, nil, nil
+	}
+	overrides := map[string]string{}
+	for _, raw := range specs {
+		spec := strings.TrimSpace(raw)
+		parts := strings.SplitN(spec, "=", 2)
+		if len(parts) != 2 {
+			return nil, nil, fmt.Errorf("--force-model %q is invalid; expected provider=model", raw)
+		}
+		provider := normalizeRunProviderKey(parts[0])
+		modelID := strings.TrimSpace(parts[1])
+		switch provider {
+		case "openai", "anthropic", "google":
+		default:
+			return nil, nil, fmt.Errorf("--force-model %q has unsupported provider %q (allowed: openai, anthropic, google, gemini)", raw, strings.TrimSpace(parts[0]))
+		}
+		if modelID == "" {
+			return nil, nil, fmt.Errorf("--force-model %q has empty model id", raw)
+		}
+		if prev, exists := overrides[provider]; exists {
+			return nil, nil, fmt.Errorf("--force-model provider %q specified multiple times (%q then %q)", provider, prev, modelID)
+		}
+		overrides[provider] = modelID
+	}
+
+	keys := make([]string, 0, len(overrides))
+	for provider := range overrides {
+		keys = append(keys, provider)
+	}
+	sort.Strings(keys)
+	canonicalSpecs := make([]string, 0, len(keys))
+	for _, provider := range keys {
+		canonicalSpecs = append(canonicalSpecs, fmt.Sprintf("%s=%s", provider, overrides[provider]))
+	}
+	return overrides, canonicalSpecs, nil
+}
+
+func normalizeRunProviderKey(provider string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	switch provider {
+	case "gemini":
+		return "google"
+	default:
+		return provider
+	}
 }
 
 func attractorValidate(args []string) {

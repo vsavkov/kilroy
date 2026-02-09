@@ -49,6 +49,8 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
     - `unset KILROY_CODEX_PATH KILROY_CLAUDE_PATH KILROY_GEMINI_PATH && ./kilroy attractor run --graph <graph.dot> --config <run.yaml>`
   - Test-shim run command:
     - `./kilroy attractor run --graph <graph.dot> --config <run.yaml> --allow-test-shim`
+  - Optional model override:
+    - `--force-model <provider=model>` (repeatable) forces a provider model and bypasses provider/model catalog membership checks for that provider.
 - Fan-in all-fail behavior:
   - When all parallel branches are `status=fail`, fan-in emits `failure_class` + `failure_signature` on the aggregate fail outcome.
   - Deterministic precedence is fail-closed: any deterministic/unknown branch class makes aggregate deterministic.

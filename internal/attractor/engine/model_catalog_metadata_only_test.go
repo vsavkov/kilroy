@@ -12,12 +12,13 @@ import (
 	"time"
 )
 
-func TestRunWithConfig_ModelCatalogIsMetadataOnly_DoesNotAffectProviderRouting(t *testing.T) {
+func TestRunWithConfig_ModelCatalogMetadata_DoesNotAffectProviderRouting_WithForceModelBypass(t *testing.T) {
 	repo := initTestRepo(t)
 	logsRoot := t.TempDir()
 
-	// Deliberately lie about the model's provider in the catalog to ensure routing
-	// is driven by the graph/node attributes, not the catalog.
+	// Deliberately lie about the model's provider in the catalog. The forced-model
+	// run option bypasses the provider/model catalog gate so we can still verify
+	// provider routing is driven by graph/config, not catalog provider metadata.
 	pinned := filepath.Join(t.TempDir(), "pinned.json")
 	if err := os.WriteFile(pinned, []byte(`{"gpt-5.2":{"litellm_provider":"anthropic","mode":"chat"}}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -70,7 +71,11 @@ digraph G {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{RunID: "test-catalog-metadata-only", LogsRoot: logsRoot})
+	_, err := RunWithConfig(ctx, dot, cfg, RunOptions{
+		RunID:       "test-catalog-metadata-only",
+		LogsRoot:    logsRoot,
+		ForceModels: map[string]string{"openai": "gpt-5.2"},
+	})
 	if err != nil {
 		t.Fatalf("RunWithConfig: %v", err)
 	}

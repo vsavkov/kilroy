@@ -46,6 +46,11 @@ type RunOptions struct {
 
 	// Allows explicit opt-in for test-shim CLI execution profile.
 	AllowTestShim bool
+
+	// Optional provider-level model overrides (provider -> model id).
+	// When set, the forced model is used for execution and bypasses model-catalog
+	// membership validation for that provider.
+	ForceModels map[string]string
 }
 
 func (o *RunOptions) applyDefaults() error {
@@ -67,6 +72,7 @@ func (o *RunOptions) applyDefaults() error {
 	if o.WorktreeDir == "" {
 		o.WorktreeDir = filepath.Join(o.LogsRoot, "worktree")
 	}
+	o.ForceModels = normalizeForceModels(o.ForceModels)
 	return nil
 }
 
@@ -906,6 +912,9 @@ func (e *Engine) writeManifest(baseSHA string) error {
 	if ws := e.warningsCopy(); len(ws) > 0 {
 		manifest["warnings"] = ws
 	}
+	if len(e.Options.ForceModels) > 0 {
+		manifest["force_models"] = copyStringStringMap(e.Options.ForceModels)
+	}
 	return writeJSON(filepath.Join(e.LogsRoot, "manifest.json"), manifest)
 }
 
@@ -1034,6 +1043,14 @@ func writeJSON(path string, v any) error {
 
 func copyStringIntMap(in map[string]int) map[string]int {
 	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func copyStringStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[k] = v
 	}

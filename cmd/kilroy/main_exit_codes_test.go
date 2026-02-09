@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -489,6 +490,60 @@ func TestUsage_IncludesAllowTestShimFlag(t *testing.T) {
 	}
 	if !strings.Contains(out, "--allow-test-shim") {
 		t.Fatalf("usage should include --allow-test-shim; output:\n%s", out)
+	}
+	if !strings.Contains(out, "--force-model") {
+		t.Fatalf("usage should include --force-model; output:\n%s", out)
+	}
+}
+
+func TestParseForceModelFlags_NormalizesAndCanonicalizes(t *testing.T) {
+	got, specs, err := parseForceModelFlags([]string{
+		"openai=gpt-5.2-codex",
+		"gemini=gemini-3-pro-preview",
+	})
+	if err != nil {
+		t.Fatalf("parseForceModelFlags: %v", err)
+	}
+	want := map[string]string{
+		"openai": "gpt-5.2-codex",
+		"google": "gemini-3-pro-preview",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("overrides: got %#v want %#v", got, want)
+	}
+	wantSpecs := []string{
+		"google=gemini-3-pro-preview",
+		"openai=gpt-5.2-codex",
+	}
+	if !reflect.DeepEqual(specs, wantSpecs) {
+		t.Fatalf("canonical specs: got %#v want %#v", specs, wantSpecs)
+	}
+}
+
+func TestParseForceModelFlags_RejectsInvalidShape(t *testing.T) {
+	if _, _, err := parseForceModelFlags([]string{"openai"}); err == nil {
+		t.Fatalf("expected parse error for missing '='")
+	}
+}
+
+func TestParseForceModelFlags_RejectsUnsupportedProvider(t *testing.T) {
+	if _, _, err := parseForceModelFlags([]string{"foo=model"}); err == nil {
+		t.Fatalf("expected parse error for unsupported provider")
+	}
+}
+
+func TestParseForceModelFlags_RejectsDuplicateProvider(t *testing.T) {
+	if _, _, err := parseForceModelFlags([]string{
+		"openai=gpt-5.2-codex",
+		"openai=gpt-5.3-codex",
+	}); err == nil {
+		t.Fatalf("expected parse error for duplicate provider")
+	}
+	if _, _, err := parseForceModelFlags([]string{
+		"gemini=gemini-3-pro-preview",
+		"google=gemini-3-flash",
+	}); err == nil {
+		t.Fatalf("expected parse error for duplicate provider alias")
 	}
 }
 
