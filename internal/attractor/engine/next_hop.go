@@ -22,7 +22,7 @@ type resolvedNextHop struct {
 	RetryTargetSource string
 }
 
-func resolveNextHop(g *model.Graph, from string, out runtime.Outcome, ctx *runtime.Context) (*resolvedNextHop, error) {
+func resolveNextHop(g *model.Graph, from string, out runtime.Outcome, ctx *runtime.Context, failureClass string) (*resolvedNextHop, error) {
 	if g == nil {
 		return nil, nil
 	}
@@ -41,6 +41,12 @@ func resolveNextHop(g *model.Graph, from string, out runtime.Outcome, ctx *runti
 				Edge:   conditional,
 				Source: nextHopSourceConditional,
 			}, nil
+		}
+
+		// Deterministic failures must not follow retry_target — the same
+		// branches will fail again, creating an infinite loop.
+		if normalizedFailureClassOrDefault(failureClass) == failureClassDeterministic {
+			return nil, nil
 		}
 
 		target, source := resolveRetryTargetWithSource(g, from)
