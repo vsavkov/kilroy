@@ -46,7 +46,7 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
   - Providers are resolved through runtime metadata (protocol family + backend + failover), not hard-coded provider switches.
   - Built-ins: `openai`, `anthropic`, `google`, `kimi`, `zai`.
   - Built-in aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`.
-  - `kimi` and `zai` are API-only in this release (`openai_chat_completions` protocol).
+  - `kimi` and `zai` are API-only in this release (`kimi` uses `anthropic_messages`; `zai` uses `openai_chat_completions`).
 - Real vs test-shim execution:
   - `llm.cli_profile` defaults to `real` and rejects `KILROY_CODEX_PATH`, `KILROY_CLAUDE_PATH`, `KILROY_GEMINI_PATH` overrides.
   - Test-shim mode requires both `llm.cli_profile: test_shim` and per-provider `executable` config.

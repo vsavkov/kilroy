@@ -43,6 +43,8 @@ func TestNewAPIClientFromProviderRuntimes_CLIOnlyIsNotAnError(t *testing.T) {
 }
 
 func TestNewAPIClientFromProviderRuntimes_RegistersOpenAICompatByProtocol(t *testing.T) {
+	// Explicit protocol overrides should still route via OpenAI-compat even if
+	// a provider's builtin defaults use a different protocol.
 	runtimes := map[string]ProviderRuntime{
 		"kimi": {
 			Key:     "kimi",
@@ -53,6 +55,28 @@ func TestNewAPIClientFromProviderRuntimes_RegistersOpenAICompatByProtocol(t *tes
 				DefaultPath:        "/v1/chat/completions",
 				DefaultAPIKeyEnv:   "KIMI_API_KEY",
 				ProviderOptionsKey: "kimi",
+			},
+		},
+	}
+	t.Setenv("KIMI_API_KEY", "test-key")
+	c, err := newAPIClientFromProviderRuntimes(runtimes)
+	if err != nil {
+		t.Fatalf("newAPIClientFromProviderRuntimes: %v", err)
+	}
+	if len(c.ProviderNames()) != 1 || c.ProviderNames()[0] != "kimi" {
+		t.Fatalf("expected kimi adapter, got %v", c.ProviderNames())
+	}
+}
+
+func TestNewAPIClientFromProviderRuntimes_RegistersAnthropicCompatForKimiCoding(t *testing.T) {
+	runtimes := map[string]ProviderRuntime{
+		"kimi": {
+			Key:     "kimi",
+			Backend: BackendAPI,
+			API: providerspec.APISpec{
+				Protocol:         providerspec.ProtocolAnthropicMessages,
+				DefaultBaseURL:   "http://127.0.0.1:0/coding",
+				DefaultAPIKeyEnv: "KIMI_API_KEY",
 			},
 		},
 	}
