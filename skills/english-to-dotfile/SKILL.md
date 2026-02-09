@@ -133,21 +133,21 @@ Fetch:
 
 Extract the "Today's Models" list and treat it as the source of **current** model lines for each provider (including any consensus entries). Also extract any per-model parameter guidance (the Weather Report "Parameters" column) to inform thinking.
 
-#### Step 0.4: Fetch Token Costs (Latest OpenRouter Model Info)
+#### Step 0.4: Fetch Token Costs (Latest LiteLLM Catalog)
 
 Fetch:
-- `curl -fsSL https://openrouter.ai/api/v1/models`
+- `curl -fsSL https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`
 
-Use OpenRouter model info to verify model IDs and look up costs. However: **if the user explicitly requests a model that is not present, always obey the user.** New models often appear before aggregators catch up. This source is a reference, not a gatekeeper. Only reject model IDs that you yourself are inventing without user or Weather Report backing.
+Use the LiteLLM catalog to verify model IDs and look up costs. However: **if the user explicitly requests a model that is not in the catalog, always obey the user.** New models often appear on provider APIs before LiteLLM adds them. The catalog is a reference, not a gatekeeper. Only reject model IDs that you yourself are inventing without user or Weather Report backing.
 
 #### Step 0.5: Resolve Weather Report Names to Real Model IDs (Best-Effort, Verified)
 
-Weather Report names may not exactly match OpenRouter model IDs.
+Weather Report names may not exactly match LiteLLM keys.
 
 For each Weather Report model name:
-- Find a matching OpenRouter `id` by searching model info (best-effort string normalization is OK).
+- Find a matching LiteLLM key by searching the catalog (best-effort string normalization is OK).
 - Prefer exact/near-exact matches and "latest" variants when present.
-- If a Weather Report model has no match, **use it anyway** — the Weather Report reflects what is actually running in production today. New models routinely appear before aggregators catalog them.
+- If a Weather Report model has no catalog match, **use it anyway** — the Weather Report reflects what is actually running in production today. New models routinely appear before LiteLLM catalogs them.
 
 #### Step 0.6: Define "Current" and "Cheapest (Current-Only)"
 
@@ -218,7 +218,7 @@ Sizing heuristics (language-agnostic):
 - Integration test = final unit
 
 Language-specific examples:
-- **Go:** `go build ./...`, `go test ./pkg/X/...`, one `pkg/` directory = one unit
+- **Go:** `go build ./cmd/<app> ./pkg/<app>/...`, `go test ./cmd/<app>/... ./pkg/<app>/...`, one `pkg/` directory = one unit
 - **Python:** `pytest tests/`, `mypy src/`, one module directory = one unit
 - **Rust:** `cargo build`, `cargo test`, one crate = one unit
 - **TypeScript:** `npm run build`, `npm test`, one package = one unit
@@ -424,8 +424,13 @@ Every prompt must be **self-contained**. The agent executing it has no memory of
 1. **What to do**: "Implement the bitmap threshold conversion per section 1.4 of demo/dttf/dttf-v1.md"
 2. **What to read**: "Read demo/dttf/dttf-v1.md section 1.4 and pkg/dttf/types.go"
 3. **What to write**: "Create pkg/dttf/loader.go with the LoadGlyphs function"
-4. **Acceptance criteria**: "Run `go build ./...` and `go test ./pkg/dttf/...` — both must pass"
+4. **Acceptance criteria**: "Run `go build ./cmd/dttf ./pkg/dttf/...` and `go test ./cmd/dttf/... ./pkg/dttf/...` — both must pass"
 5. **Outcome instructions**: "Write status.json: outcome=success if all pass, outcome=fail with failure_reason"
+
+Validation scope policy:
+- Required checks must be scoped to the project/module paths created by the pipeline (for Go, prefer `./cmd/<app>` + `./pkg/<app>/...`).
+- Do NOT default to repo-wide `./...` required checks in monorepos/sandboxed environments unless the user explicitly requests full-repo validation.
+- Repo-wide network-dependent checks are advisory. If attempted and blocked by DNS/proxy/network policy, record them as skipped in `.ai/` output and continue based on scoped required checks.
 
 Implementation prompt template:
 ```
@@ -615,6 +620,7 @@ Custom outcome values work: `outcome=port`, `outcome=skip`, `outcome=needs_fix`.
 14. **Hardcoding language commands.** Use the correct build/test/lint commands for the project's language. Don't write `go build` for a Python project.
 15. **Missing file-based handoff.** Every node that produces output for downstream nodes must write it to a named `.ai/` file. Every node that consumes prior output must be told which files to read. Relying on context variables for large data (plans, reviews, logs) does not work — use the filesystem.
 16. **Binary-only outcomes in steering nodes.** If a workflow has more than two paths (e.g., process/skip/done), define custom outcome values in the prompt and route on them with conditions. Don't force everything into success/fail.
+17. **Unscoped Go monorepo checks.** Do NOT make repo-wide `go build ./...`, `go vet ./...`, or `go test ./...` required by default. Scope required checks to generated project paths (e.g., `./cmd/<app>`, `./pkg/<app>/...`). Treat blocked repo-wide network checks as advisory/skipped.
 
 ## Notes on Reference Dotfile Conventions
 
@@ -655,12 +661,12 @@ digraph linkcheck {
 	    // Project setup
 	    impl_setup [
 	        shape=box,
-	        prompt="Goal: $goal\n\nRead .ai/spec.md. Create Go project: go.mod, cmd/linkcheck/main.go stub, pkg/ directories.\n\nRun: go build ./...\n\nWrite status.json: outcome=success if builds, outcome=fail otherwise."
+	        prompt="Goal: $goal\n\nRead .ai/spec.md. Create Go project: go.mod, cmd/linkcheck/main.go stub, pkg/linkcheck/ directories.\n\nRun: go build ./cmd/linkcheck ./pkg/linkcheck/...\n\nWrite status.json: outcome=success if builds, outcome=fail otherwise."
 	    ]
 
 	    verify_setup [
 	        shape=box, class="verify",
-	        prompt="Verify project setup.\n\nRun:\n1. go build ./...\n2. go vet ./...\n3. Check go.mod and cmd/ exist\n\nWrite results to .ai/verify_setup.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
+	        prompt="Verify project setup.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. go vet ./cmd/linkcheck ./pkg/linkcheck/...\n3. Check go.mod and cmd/linkcheck exist\n4. Guardrail: `find . -name go.mod` should include only `./go.mod`\n\nWrite results to .ai/verify_setup.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
 	    ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -668,12 +674,12 @@ digraph linkcheck {
 	    // Core implementation
 	    impl_core [
 	        shape=box, class="hard", max_retries=2,
-	        prompt="Goal: $goal\n\nRead .ai/spec.md. Implement: URL crawling, link extraction, HTTP checking, robots.txt parser, output formatters (text + JSON). Create tests.\n\nRun: go test ./...\n\nWrite status.json: outcome=success if tests pass, outcome=fail otherwise."
+	        prompt="Goal: $goal\n\nRead .ai/spec.md. Implement: URL crawling, link extraction, HTTP checking, robots.txt parser, output formatters (text + JSON). Create tests.\n\nRun: go test ./cmd/linkcheck/... ./pkg/linkcheck/...\n\nWrite status.json: outcome=success if tests pass, outcome=fail otherwise."
 	    ]
 
 	    verify_core [
 	        shape=box, class="verify",
-	        prompt="Verify core implementation.\n\nRun:\n1. go build ./...\n2. go vet ./...\n3. go test ./... -v\n\nWrite results to .ai/verify_core.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
+	        prompt="Verify core implementation.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. go vet ./cmd/linkcheck ./pkg/linkcheck/...\n3. go test ./cmd/linkcheck/... ./pkg/linkcheck/... -v\n\nWrite results to .ai/verify_core.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
 	    ]
 
     check_core [shape=diamond, label="Core OK?"]
@@ -681,7 +687,7 @@ digraph linkcheck {
 	    // Review
 	    review [
 	        shape=box, class="review", goal_gate=true,
-	        prompt="Goal: $goal\n\nRead .ai/spec.md. Review the full implementation against the spec. Check: all features implemented, tests pass, CLI works, error handling correct.\n\nRun: go build ./cmd/linkcheck && go test ./...\n\nWrite review to .ai/final_review.md.\nWrite status.json: outcome=success if complete, outcome=fail with what's missing."
+	        prompt="Goal: $goal\n\nRead .ai/spec.md. Review the full implementation against the spec. Check: all features implemented, tests pass, CLI works, error handling correct.\n\nSandboxed validation policy:\n- Required checks are scoped to `cmd/linkcheck` and `pkg/linkcheck`.\n- Repo-wide network-dependent checks are advisory only.\n\nRun: go build ./cmd/linkcheck ./pkg/linkcheck/... && go test ./cmd/linkcheck/... ./pkg/linkcheck/...\n\nWrite review to .ai/final_review.md.\nWrite status.json: outcome=success if complete, outcome=fail with what's missing."
 	    ]
 
     check_review [shape=diamond, label="Review OK?"]
