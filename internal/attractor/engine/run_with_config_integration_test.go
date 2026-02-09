@@ -274,6 +274,13 @@ digraph G {
 	if ctxID == "" {
 		t.Fatalf("manifest missing cxdb.context_id: %v", manifest["cxdb"])
 	}
+	modeldbInfo, _ := manifest["modeldb"].(map[string]any)
+	if strings.TrimSpace(anyToString(modeldbInfo["openrouter_model_info_path"])) == "" {
+		t.Fatalf("manifest missing modeldb.openrouter_model_info_path: %v", manifest["modeldb"])
+	}
+	if strings.TrimSpace(anyToString(modeldbInfo["litellm_catalog_path"])) == "" {
+		t.Fatalf("manifest missing compatibility modeldb.litellm_catalog_path: %v", manifest["modeldb"])
+	}
 
 	turns := cxdbSrv.Turns(ctxID)
 	if len(turns) == 0 {
@@ -285,20 +292,22 @@ digraph G {
 	hasCheckpointSaved := false
 	hasArtifact := false
 	wantArtifacts := map[string]bool{
-		"manifest.json":       true,
-		"checkpoint.json":     true,
-		"final.json":          true,
-		"prompt.md":           true,
-		"response.md":         true,
-		"status.json":         true,
-		"events.ndjson":       true,
-		"events.json":         true,
-		"cli_invocation.json": true,
-		"stdout.log":          true,
-		"output.json":         true,
-		"output_schema.json":  true,
-		"stage.tgz":           true,
-		"run.tgz":             true,
+		"manifest.json":                  true,
+		"checkpoint.json":                true,
+		"final.json":                     true,
+		"modeldb/openrouter_models.json": true,
+		"modeldb/litellm_catalog.json":   true,
+		"prompt.md":                      true,
+		"response.md":                    true,
+		"status.json":                    true,
+		"events.ndjson":                  true,
+		"events.json":                    true,
+		"cli_invocation.json":            true,
+		"stdout.log":                     true,
+		"output.json":                    true,
+		"output_schema.json":             true,
+		"stage.tgz":                      true,
+		"run.tgz":                        true,
 	}
 	seenArtifacts := map[string]bool{}
 	for _, tr := range turns {
