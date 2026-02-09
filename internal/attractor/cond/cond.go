@@ -48,6 +48,7 @@ func evalClause(clause string, outcome runtime.Outcome, ctx *runtime.Context) (b
 		k := strings.TrimSpace(parts[0])
 		want := strings.TrimSpace(parts[1])
 		got := resolveKey(k, outcome, ctx)
+		want = canonicalizeCompareValue(k, want)
 		return got != want, nil
 	}
 	if strings.Contains(clause, "=") {
@@ -58,6 +59,7 @@ func evalClause(clause string, outcome runtime.Outcome, ctx *runtime.Context) (b
 		k := strings.TrimSpace(parts[0])
 		want := strings.TrimSpace(parts[1])
 		got := resolveKey(k, outcome, ctx)
+		want = canonicalizeCompareValue(k, want)
 		return got == want, nil
 	}
 	// Bare key: truthy if non-empty and not "false"/"0" (best-effort).
@@ -103,4 +105,16 @@ func resolveKey(key string, outcome runtime.Outcome, ctx *runtime.Context) strin
 		}
 	}
 	return ""
+}
+
+// canonicalizeCompareValue normalizes the comparison value for outcome conditions
+// so that aliases like "skip"/"skipped" and "failure"/"fail" match correctly.
+func canonicalizeCompareValue(key, value string) string {
+	if key != "outcome" {
+		return value
+	}
+	if canonical, err := runtime.ParseStageStatus(value); err == nil {
+		return string(canonical)
+	}
+	return value
 }

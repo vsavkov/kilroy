@@ -61,3 +61,40 @@ func TestEvaluate_CustomOutcome(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluate_OutcomeAliasesMatch(t *testing.T) {
+	// Edge conditions using aliases (e.g. outcome=skip) must match the
+	// canonical form produced by ParseStageStatus (e.g. "skipped").
+	ctx := runtime.NewContext()
+
+	cases := []struct {
+		name   string
+		status runtime.StageStatus
+		cond   string
+		want   bool
+	}{
+		// "skip" in status.json → canonical "skipped"; edge says outcome=skip
+		{"skip_alias_eq", runtime.StatusSkipped, "outcome=skip", true},
+		{"skip_alias_canonical", runtime.StatusSkipped, "outcome=skipped", true},
+		{"skip_alias_neq", runtime.StatusSkipped, "outcome!=skip", false},
+		// "failure" in edge → canonical "fail"
+		{"failure_alias_eq", runtime.StatusFail, "outcome=failure", true},
+		{"failure_alias_neq", runtime.StatusFail, "outcome!=failure", false},
+		// "error" alias
+		{"error_alias_eq", runtime.StatusFail, "outcome=error", true},
+		// "ok" alias
+		{"ok_alias_eq", runtime.StatusSuccess, "outcome=ok", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := runtime.Outcome{Status: tc.status}
+			got, err := Evaluate(tc.cond, out, ctx)
+			if err != nil {
+				t.Fatalf("Evaluate(%q) error: %v", tc.cond, err)
+			}
+			if got != tc.want {
+				t.Fatalf("Evaluate(%q) with status=%q: got %v, want %v", tc.cond, tc.status, got, tc.want)
+			}
+		})
+	}
+}

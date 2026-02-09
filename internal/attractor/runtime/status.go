@@ -28,18 +28,6 @@ func ParseStageStatus(s string) (StageStatus, error) {
 		return StatusFail, nil
 	case "skipped", "skip":
 		return StatusSkipped, nil
-
-	// Upstream pseudo-enums appear in docs; accept them on read.
-	case "SUCCESS":
-		return StatusSuccess, nil
-	case "PARTIAL_SUCCESS":
-		return StatusPartialSuccess, nil
-	case "RETRY":
-		return StatusRetry, nil
-	case "FAIL":
-		return StatusFail, nil
-	case "SKIPPED":
-		return StatusSkipped, nil
 	default:
 		// Custom outcome values (e.g. "process", "done", "port") are used
 		// in reference dotfiles (semport.dot, consensus_task.dot) for
