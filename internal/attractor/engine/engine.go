@@ -43,6 +43,9 @@ type RunOptions struct {
 	// Optional callback invoked after CXDB/UI bootstrap and before pipeline execution starts.
 	// Pointer is used to avoid copying synchronization primitives inside CXDBStartupInfo.
 	OnCXDBStartup func(info *CXDBStartupInfo)
+
+	// Allows explicit opt-in for test-shim CLI execution profile.
+	AllowTestShim bool
 }
 
 func (o *RunOptions) applyDefaults() error {

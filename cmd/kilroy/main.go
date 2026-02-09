@@ -26,7 +26,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
-	fmt.Fprintln(os.Stderr, "  kilroy attractor run [--detach] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]")
+	fmt.Fprintln(os.Stderr, "  kilroy attractor run [--detach] [--allow-test-shim] --graph <file.dot> --config <run.yaml> [--run-id <id>] [--logs-root <dir>]")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --logs-root <dir>")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --cxdb <http_base_url> --context-id <id>")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor resume --run-branch <attractor/run/...> [--repo <path>]")
@@ -60,11 +60,14 @@ func attractorRun(args []string) {
 	var runID string
 	var logsRoot string
 	var detach bool
+	var allowTestShim bool
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--detach":
 			detach = true
+		case "--allow-test-shim":
+			allowTestShim = true
 		case "--graph":
 			i++
 			if i >= len(args) {
@@ -129,6 +132,9 @@ func attractorRun(args []string) {
 		if logsRoot != "" {
 			childArgs = append(childArgs, "--logs-root", logsRoot)
 		}
+		if allowTestShim {
+			childArgs = append(childArgs, "--allow-test-shim")
+		}
 
 		if err := launchDetached(childArgs, logsRoot); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -153,8 +159,9 @@ func attractorRun(args []string) {
 	ctx := context.Background()
 
 	res, err := engine.RunWithConfig(ctx, dotSource, cfg, engine.RunOptions{
-		RunID:    runID,
-		LogsRoot: logsRoot,
+		RunID:         runID,
+		LogsRoot:      logsRoot,
+		AllowTestShim: allowTestShim,
 		OnCXDBStartup: func(info *engine.CXDBStartupInfo) {
 			if info == nil {
 				return

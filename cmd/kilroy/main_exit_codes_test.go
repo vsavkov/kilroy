@@ -458,6 +458,40 @@ digraph G {
 	}
 }
 
+func TestAttractorRun_AllowsTestShimFlag(t *testing.T) {
+	cxdbSrv := newCXDBTestServer(t)
+	bin := buildKilroyBinary(t)
+	repo := initTestRepo(t)
+	catalog := writePinnedCatalog(t)
+	cfg := writeRunConfig(t, repo, cxdbSrv.URL(), cxdbSrv.BinaryAddr(), catalog)
+
+	graph := filepath.Join(t.TempDir(), "success.dot")
+	_ = os.WriteFile(graph, []byte(`
+digraph G {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  start -> exit
+}
+`), 0o644)
+
+	logsRoot := filepath.Join(t.TempDir(), "logs")
+	code, out := runKilroy(t, bin, "attractor", "run", "--graph", graph, "--config", cfg, "--run-id", "allow-test-shim", "--logs-root", logsRoot, "--allow-test-shim")
+	if code != 0 {
+		t.Fatalf("exit code: got %d want 0\n%s", code, out)
+	}
+}
+
+func TestUsage_IncludesAllowTestShimFlag(t *testing.T) {
+	bin := buildKilroyBinary(t)
+	code, out := runKilroy(t, bin)
+	if code != 1 {
+		t.Fatalf("exit code: got %d want 1\n%s", code, out)
+	}
+	if !strings.Contains(out, "--allow-test-shim") {
+		t.Fatalf("usage should include --allow-test-shim; output:\n%s", out)
+	}
+}
+
 func TestKilroyAttractorRun_PrintsCXDBUILink(t *testing.T) {
 	cxdbSrv := newCXDBTestServer(t)
 	bin := buildKilroyBinary(t)
