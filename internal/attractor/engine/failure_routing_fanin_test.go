@@ -102,6 +102,61 @@ digraph G {
 	}
 }
 
+func TestFailureRouting_FanInAllFail_DeterministicBlocksRetryTarget(t *testing.T) {
+	repo := t.TempDir()
+	runCmd(t, repo, "git", "init")
+	runCmd(t, repo, "git", "config", "user.name", "tester")
+	runCmd(t, repo, "git", "config", "user.email", "tester@example.com")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644)
+	runCmd(t, repo, "git", "add", "-A")
+	runCmd(t, repo, "git", "commit", "-m", "init")
+
+	dot := []byte(`
+digraph G {
+  graph [goal="fanin-deterministic-retry-target", retry_target="impl_setup", default_max_retry=0]
+  start [shape=Mdiamond]
+  impl_setup [shape=parallelogram, tool_command="echo setup-ok"]
+  par [shape=component]
+  a [shape=parallelogram, tool_command="echo fail-a >&2; exit 1"]
+  b [shape=parallelogram, tool_command="echo fail-b >&2; exit 1"]
+  join [shape=tripleoctagon]
+  exit [shape=Msquare]
+
+  start -> impl_setup
+  impl_setup -> par
+  par -> a
+  par -> b
+  a -> join
+  b -> join
+  join -> exit
+}
+`)
+
+	logsRoot := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	res, err := Run(ctx, dot, RunOptions{
+		RepoPath: repo,
+		RunID:    "fanin-deterministic-blocks-retry",
+		LogsRoot: logsRoot,
+	})
+	if err == nil {
+		t.Fatalf("expected terminal failure; got success result=%+v", res)
+	}
+
+	// Verify the run did NOT follow retry_target back to impl_setup after fan-in failure.
+	progressPath := filepath.Join(logsRoot, "progress.ndjson")
+	if fanInEdgeWasSelected(t, progressPath, "join", "impl_setup") {
+		t.Fatalf("engine followed retry_target from join to impl_setup despite deterministic failure")
+	}
+
+	// Verify final.json was written with failure status.
+	final := mustReadFinalOutcome(t, filepath.Join(logsRoot, "final.json"))
+	if final.Status != runtime.FinalFail {
+		t.Fatalf("final status: got %q want %q", final.Status, runtime.FinalFail)
+	}
+}
+
 func fanInEdgeWasSelected(t *testing.T, progressPath, from, to string) bool {
 	t.Helper()
 	for _, ev := range mustReadProgressEventsFile(t, progressPath) {
