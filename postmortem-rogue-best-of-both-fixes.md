@@ -38,7 +38,7 @@ It intentionally separates:
 ## Runtime Data Model Definitions (Must Be Explicit Before Coding)
 
 - `run_generation`: monotonic integer incremented on each loop-restart generation of a run; included on liveness events to avoid stale-branch attribution.
-- `attempt_id`: deterministic identifier for a stage attempt, format `node_id:attempt_ordinal`, where `attempt_ordinal` is 1-indexed to match attractor retry semantics.
+- `attempt_id`: deterministic identifier for a stage attempt, format `branch_id:node_id:attempt_ordinal`, where `attempt_ordinal` is 1-indexed to match attractor retry semantics.
 - `terminal_artifact`: top-level `final.json` at run logs root, schema aligned with `internal/attractor/runtime/final.go`:
   - `timestamp`
   - `status` (`success|fail`)
@@ -48,9 +48,9 @@ It intentionally separates:
   - `cxdb_context_id`
   - `cxdb_head_turn_id`
 - Terminal status mapping (run-level, intentionally binary):
-  - stage terminal `success`, `partial_success`, `skipped` -> run `success`
-  - stage terminal `fail`, exhausted `retry` -> run `fail`
-- `cycle_break_threshold`: sourced from graph attribute `loop_restart_signature_limit` (existing), default `3` when unset/invalid.
+  - run `success` only when pipeline reaches terminal success state with goal-gate constraints satisfied
+  - run `fail` for terminal failures (including exhausted retries, watchdog/cancel/internal fatal paths, or unsatisfied goal-gate completion)
+- `cycle_break_threshold`: sourced from runtime graph attribute `loop_restart_signature_limit` (implemented in engine today, not in attractor-spec), default `3` when unset/invalid.
   - This graph attribute is runtime-contract behavior today and must be documented as a spec delta.
 
 ## Event Taxonomy Mapping (Bridge, Not Replacement)
@@ -80,8 +80,8 @@ Accepted liveness event set for watchdog:
 - Preserve join policy semantics (`wait_all`, `k_of_n`, `first_success`, `quorum`) and error policy semantics (`fail_fast`, `continue`, `ignore`) while run is live.
 - Run-level cancellation precedence rule (runtime policy pending spec delta): cancellation always stops further work regardless of branch `error_policy`; `error_policy` only governs branch-local failure handling before cancellation.
 - Resolve attractor status-case inconsistency explicitly: Section 5.2 enum style vs Section 10.3 lowercase outcomes.
-  - Engine behavior: parse case-insensitively, normalize internal values to lowercase, emit lowercase.
-  - Backward compatibility: known outcome tokens remain case-insensitive in condition matching so uppercase legacy DOT conditions keep working.
+  - Engine behavior: status-file parsing can be tolerant for legacy input casing, but DOT condition matching remains spec-defined case-sensitive until/if specs change.
+  - Migration note: legacy uppercase DOT conditions must be rewritten to lowercase via lint/fix tooling before enabling any casing-canonicalization change to condition evaluation.
   - Spec delta: codify lowercase as canonical wire/storage form.
 
 ## P0 (Immediate)
@@ -160,7 +160,15 @@ Accepted liveness event set for watchdog:
   - Integration: subgraph breaker triggers at configured limit.
 - Status ingestion.
   - Unit: precedence + ownership decision table.
+  - Decision table minimum cases:
+  - canonical present + valid -> choose canonical
+  - canonical missing + worktree status valid/owned -> choose worktree status
+  - canonical missing + worktree invalid + .ai valid/owned -> choose .ai status
+  - canonical missing + fallback ownership mismatch -> reject fallback
+  - canonical present + fallback present -> canonical wins
+  - fallback accepted -> atomic canonical copy with provenance recorded
   - Integration: canonical/fallback behavior with actual files.
+  - Assertions: selected source path, ownership verdict, canonical write behavior (temp+rename), and provenance metadata are all observable.
 - Failure propagation.
   - Unit: check/conditional passes through raw reason/class metadata.
   - Integration: terminal artifact preserves causal reason.
