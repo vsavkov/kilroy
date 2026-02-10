@@ -98,6 +98,11 @@ type RunConfigFile struct {
 		PushRemote      string `json:"push_remote,omitempty" yaml:"push_remote,omitempty"`
 	} `json:"git" yaml:"git"`
 
+	Setup struct {
+		Commands  []string `json:"commands,omitempty" yaml:"commands,omitempty"`
+		TimeoutMS int      `json:"timeout_ms,omitempty" yaml:"timeout_ms,omitempty"`
+	} `json:"setup,omitempty" yaml:"setup,omitempty"`
+
 	RuntimePolicy RuntimePolicyConfig `json:"runtime_policy,omitempty" yaml:"runtime_policy,omitempty"`
 	Preflight     PreflightConfig     `json:"preflight,omitempty" yaml:"preflight,omitempty"`
 }
@@ -170,6 +175,9 @@ func applyConfigDefaults(cfg *RunConfigFile) {
 	}
 	if cfg.CXDB.Autostart.PollIntervalMS == 0 {
 		cfg.CXDB.Autostart.PollIntervalMS = 250
+	}
+	if cfg.Setup.TimeoutMS == 0 {
+		cfg.Setup.TimeoutMS = 300000 // 5 minutes
 	}
 	cfg.CXDB.Autostart.Command = trimNonEmpty(cfg.CXDB.Autostart.Command)
 	cfg.CXDB.Autostart.UI.Command = trimNonEmpty(cfg.CXDB.Autostart.UI.Command)
