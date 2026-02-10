@@ -42,8 +42,8 @@ func TestRunSubgraphUntil_ContextCanceled_StopsBeforeNextNode(t *testing.T) {
 	}
 }
 
-func TestParallelCancelPrecedence_IgnorePolicyDoesNotScheduleNewWork(t *testing.T) {
-	got := runParallelCancelFixture(t, "ignore")
+func TestParallelCancelPrecedence_DoesNotScheduleNewWork(t *testing.T) {
+	got := runParallelCancelFixture(t)
 	if got.startedNodesAfterCancel > 0 {
 		t.Fatalf("started %d nodes after cancel", got.startedNodesAfterCancel)
 	}

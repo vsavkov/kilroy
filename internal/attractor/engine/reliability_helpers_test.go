@@ -278,9 +278,8 @@ digraph G {
 	return got, logsRoot, runErr
 }
 
-func runParallelCancelFixture(t *testing.T, policy string) parallelCancelFixtureResult {
+func runParallelCancelFixture(t *testing.T) parallelCancelFixtureResult {
 	t.Helper()
-	_ = policy
 	got := runCanceledSubgraphFixture(t)
 	return parallelCancelFixtureResult{startedNodesAfterCancel: got.startedNodesAfterCancel}
 }

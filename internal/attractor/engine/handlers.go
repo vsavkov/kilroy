@@ -133,15 +133,19 @@ func (h *ConditionalHandler) Execute(ctx context.Context, exec *Execution, node 
 		prevFailure = exec.Context.GetString("failure_reason", "")
 		prevFailureClass = exec.Context.GetString("failure_class", "")
 	}
+	var contextUpdates map[string]any
+	if cls := strings.TrimSpace(prevFailureClass); cls != "" && cls != "<nil>" {
+		contextUpdates = map[string]any{
+			"failure_class": cls,
+		}
+	}
 
 	return runtime.Outcome{
 		Status:         prevStatus,
 		PreferredLabel: prevPreferred,
 		FailureReason:  prevFailure,
 		Notes:          "conditional pass-through",
-		ContextUpdates: map[string]any{
-			"failure_class": prevFailureClass,
-		},
+		ContextUpdates: contextUpdates,
 	}, nil
 }
 
@@ -170,12 +174,17 @@ const (
 	statusSourceDotAI     statusSource = "dot_ai"
 )
 
-func copyFirstValidFallbackStatus(stageStatusPath string, fallbackPaths []string) (statusSource, error) {
+type fallbackStatusPath struct {
+	path   string
+	source statusSource
+}
+
+func copyFirstValidFallbackStatus(stageStatusPath string, fallbackPaths []fallbackStatusPath) (statusSource, error) {
 	if _, err := os.Stat(stageStatusPath); err == nil {
 		return statusSourceCanonical, nil
 	}
-	for idx, p := range fallbackPaths {
-		b, err := os.ReadFile(p)
+	for _, fallback := range fallbackPaths {
+		b, err := os.ReadFile(fallback.path)
 		if err != nil {
 			continue
 		}
@@ -185,11 +194,8 @@ func copyFirstValidFallbackStatus(stageStatusPath string, fallbackPaths []string
 		if err := runtime.WriteFileAtomic(stageStatusPath, b); err != nil {
 			return statusSourceNone, err
 		}
-		_ = os.Remove(p)
-		if idx == 0 {
-			return statusSourceWorktree, nil
-		}
-		return statusSourceDotAI, nil
+		_ = os.Remove(fallback.path)
+		return fallback.source, nil
 	}
 	return statusSourceNone, nil
 }
@@ -201,15 +207,21 @@ func (h *CodergenHandler) Execute(ctx context.Context, exec *Execution, node *mo
 	// The codergen backends run in the worktree, so treat common worktree status paths as a
 	// best-effort status-file contract signal and move/copy the first one found into the
 	// stage directory.
-	worktreeStatusPaths := []string{}
+	worktreeStatusPaths := []fallbackStatusPath{}
 	if exec != nil && strings.TrimSpace(exec.WorktreeDir) != "" {
 		worktreeStatusPaths = append(worktreeStatusPaths,
-			filepath.Join(exec.WorktreeDir, "status.json"),
-			filepath.Join(exec.WorktreeDir, ".ai", "status.json"),
+			fallbackStatusPath{
+				path:   filepath.Join(exec.WorktreeDir, "status.json"),
+				source: statusSourceWorktree,
+			},
+			fallbackStatusPath{
+				path:   filepath.Join(exec.WorktreeDir, ".ai", "status.json"),
+				source: statusSourceDotAI,
+			},
 		)
 		// Clear stale files from prior stages so we don't accidentally attribute them.
 		for _, statusPath := range worktreeStatusPaths {
-			_ = os.Remove(statusPath)
+			_ = os.Remove(statusPath.path)
 		}
 	}
 

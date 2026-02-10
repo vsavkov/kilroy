@@ -39,6 +39,25 @@ type parallelBranchResult struct {
 	Artifacts      map[string][]string `json:"artifacts,omitempty"`
 }
 
+func branchLivenessKeepaliveInterval(stallTimeout time.Duration) time.Duration {
+	const (
+		defaultInterval = 200 * time.Millisecond
+		minInterval     = 50 * time.Millisecond
+		maxInterval     = 2 * time.Second
+	)
+	if stallTimeout <= 0 {
+		return defaultInterval
+	}
+	interval := stallTimeout / 3
+	if interval < minInterval {
+		return minInterval
+	}
+	if interval > maxInterval {
+		return maxInterval
+	}
+	return interval
+}
+
 func (h *ParallelHandler) Execute(ctx context.Context, exec *Execution, node *model.Node) (runtime.Outcome, error) {
 	if exec == nil || exec.Engine == nil || exec.Graph == nil {
 		return runtime.Outcome{Status: runtime.StatusFail, FailureReason: "parallel handler missing execution context"}, nil
@@ -249,9 +268,10 @@ func (h *ParallelHandler) runBranch(ctx context.Context, exec *Execution, parall
 	emitBranchLiveness("branch_subgraph_start")
 	keepaliveStop := make(chan struct{})
 	keepaliveDone := make(chan struct{})
+	keepaliveInterval := branchLivenessKeepaliveInterval(exec.Engine.Options.StallTimeout)
 	go func() {
 		defer close(keepaliveDone)
-		ticker := time.NewTicker(200 * time.Millisecond)
+		ticker := time.NewTicker(keepaliveInterval)
 		defer ticker.Stop()
 		for {
 			select {

@@ -104,3 +104,22 @@ func TestConditionalPassThrough_PreservesFailureReasonAndClass(t *testing.T) {
 		t.Fatalf("failure_class=%q want %q", got, failureClassTransientInfra)
 	}
 }
+
+func TestConditionalPassThrough_DoesNotEmitEmptyFailureClassUpdate(t *testing.T) {
+	ctxState := runtime.NewContext()
+	ctxState.Set("outcome", "success")
+	ctxState.Set("preferred_label", "next")
+
+	out, err := (&ConditionalHandler{}).Execute(context.Background(), &Execution{
+		Context: ctxState,
+	}, model.NewNode("cond"))
+	if err != nil {
+		t.Fatalf("ConditionalHandler.Execute: %v", err)
+	}
+	if out.ContextUpdates == nil {
+		return
+	}
+	if _, ok := out.ContextUpdates["failure_class"]; ok {
+		t.Fatalf("unexpected failure_class update on success path: %v", out.ContextUpdates["failure_class"])
+	}
+}

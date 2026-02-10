@@ -35,16 +35,22 @@ func runSubgraphUntil(ctx context.Context, eng *Engine, startNodeID, stopNodeID 
 			"failure_reason": strings.TrimSpace(out.FailureReason),
 		})
 	}
+	buildResult := func(out runtime.Outcome) parallelBranchResult {
+		return parallelBranchResult{
+			HeadSHA:    headSHA,
+			LastNodeID: lastNode,
+			Outcome:    out,
+			Completed:  completed,
+		}
+	}
+	canceledReturn := func(nodeID string, out runtime.Outcome, cause error) (parallelBranchResult, error) {
+		emitCanceledExit(nodeID, out)
+		return buildResult(out), cause
+	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			emitCanceledExit(current, lastOutcome)
-			return parallelBranchResult{
-				HeadSHA:    headSHA,
-				LastNodeID: lastNode,
-				Outcome:    lastOutcome,
-				Completed:  completed,
-			}, err
+			return canceledReturn(current, lastOutcome, err)
 		}
 
 		if strings.TrimSpace(stopNodeID) != "" && current == stopNodeID {
@@ -68,13 +74,7 @@ func runSubgraphUntil(ctx context.Context, eng *Engine, startNodeID, stopNodeID 
 		}
 		eng.cxdbStageFinished(ctx, node, out)
 		if err := ctx.Err(); err != nil {
-			emitCanceledExit(node.ID, out)
-			return parallelBranchResult{
-				HeadSHA:    headSHA,
-				LastNodeID: lastNode,
-				Outcome:    out,
-				Completed:  completed,
-			}, err
+			return canceledReturn(node.ID, out, err)
 		}
 
 		// Record completion.
@@ -135,13 +135,7 @@ func runSubgraphUntil(ctx context.Context, eng *Engine, startNodeID, stopNodeID 
 		lastNode = node.ID
 		lastOutcome = out
 		if err := ctx.Err(); err != nil {
-			emitCanceledExit(node.ID, lastOutcome)
-			return parallelBranchResult{
-				HeadSHA:    headSHA,
-				LastNodeID: lastNode,
-				Outcome:    lastOutcome,
-				Completed:  completed,
-			}, err
+			return canceledReturn(node.ID, lastOutcome, err)
 		}
 
 		next, err := selectNextEdge(eng.Graph, node.ID, out, eng.Context)
@@ -168,13 +162,7 @@ func runSubgraphUntil(ctx context.Context, eng *Engine, startNodeID, stopNodeID 
 			return parallelBranchResult{}, fmt.Errorf("loop_restart not supported in v1")
 		}
 		if err := ctx.Err(); err != nil {
-			emitCanceledExit(node.ID, lastOutcome)
-			return parallelBranchResult{
-				HeadSHA:    headSHA,
-				LastNodeID: lastNode,
-				Outcome:    lastOutcome,
-				Completed:  completed,
-			}, err
+			return canceledReturn(node.ID, lastOutcome, err)
 		}
 		current = next.To
 	}
