@@ -188,6 +188,74 @@ func TestSession_EventSystem_ToolCall_EmitsStartDeltaEnd(t *testing.T) {
 	}
 }
 
+func TestSession_MalformedToolArgs_StillPairsToolResultsByCallID(t *testing.T) {
+	dir := t.TempDir()
+	c := llm.NewClient()
+	f := &fakeAdapter{
+		name: "openai",
+		steps: []func(req llm.Request) llm.Response{
+			func(req llm.Request) llm.Response {
+				return llm.Response{
+					Message: llm.Message{
+						Role: llm.RoleAssistant,
+						Content: []llm.ContentPart{
+							{Kind: llm.ContentToolCall, ToolCall: &llm.ToolCallData{ID: "glob:20", Name: "glob", Arguments: json.RawMessage(`{"pattern":"*.c"}{"path":"demo/rogue/original-rogue"}`)}},
+							{Kind: llm.ContentToolCall, ToolCall: &llm.ToolCallData{ID: "glob:21", Name: "glob", Arguments: json.RawMessage(`{"pattern":"*.h"}{"path":"demo/rogue/original-rogue"}`)}},
+						},
+					},
+				}
+			},
+			func(req llm.Request) llm.Response {
+				seen := map[string]bool{"glob:20": false, "glob:21": false}
+				for _, m := range req.Messages {
+					if m.Role != llm.RoleTool {
+						continue
+					}
+					for _, p := range m.Content {
+						if p.Kind != llm.ContentToolResult || p.ToolResult == nil {
+							continue
+						}
+						id := strings.TrimSpace(p.ToolResult.ToolCallID)
+						if _, ok := seen[id]; !ok {
+							continue
+						}
+						seen[id] = true
+						if !p.ToolResult.IsError {
+							t.Fatalf("expected tool result for %q to be error", id)
+						}
+						content := fmt.Sprint(p.ToolResult.Content)
+						if !strings.Contains(content, "invalid tool arguments JSON") {
+							t.Fatalf("expected invalid args error for %q, got %q", id, content)
+						}
+					}
+				}
+				for id, ok := range seen {
+					if !ok {
+						t.Fatalf("missing tool result for call_id %q", id)
+					}
+				}
+				return llm.Response{Message: llm.Assistant("ok")}
+			},
+		},
+	}
+	c.Register(f)
+
+	sess, err := NewSession(c, NewOpenAIProfile("gpt-5.2"), NewLocalExecutionEnvironment(dir), SessionConfig{})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if out, err := sess.ProcessInput(ctx, "check malformed tool args"); err != nil || strings.TrimSpace(out) != "ok" {
+		t.Fatalf("ProcessInput: out=%q err=%v", out, err)
+	}
+	sess.Close()
+
+	if got := len(f.Requests()); got != 2 {
+		t.Fatalf("requests: got %d want 2", got)
+	}
+}
+
 func TestSession_MaxTurns_StopsAcrossRoundsAndEmitsEvent(t *testing.T) {
 	dir := t.TempDir()
 	c := llm.NewClient()
@@ -368,36 +436,36 @@ func TestSession_Steer_IsInjectedAfterCurrentToolRound(t *testing.T) {
 			foundSteering = true
 		}
 	}
-		if !foundSteering {
-			t.Fatalf("expected steering turn in history; got %+v", turns)
-		}
-		sess.Close()
-
-		toolEndIdx := -1
-		steerIdx := -1
-		i := 0
-		for ev := range sess.Events() {
-			switch ev.Kind {
-			case EventToolCallEnd:
-				toolEndIdx = i
-			case EventSteeringInjected:
-				if ev.Data["text"] != "steer: do X" {
-					t.Fatalf("STEERING_INJECTED data: %+v", ev.Data)
-				}
-				steerIdx = i
-			}
-			i++
-		}
-		if toolEndIdx == -1 {
-			t.Fatalf("expected TOOL_CALL_END event")
-		}
-		if steerIdx == -1 {
-			t.Fatalf("expected STEERING_INJECTED event")
-		}
-		if steerIdx <= toolEndIdx {
-			t.Fatalf("expected steering injection after tool round; TOOL_CALL_END=%d STEERING_INJECTED=%d", toolEndIdx, steerIdx)
-		}
+	if !foundSteering {
+		t.Fatalf("expected steering turn in history; got %+v", turns)
 	}
+	sess.Close()
+
+	toolEndIdx := -1
+	steerIdx := -1
+	i := 0
+	for ev := range sess.Events() {
+		switch ev.Kind {
+		case EventToolCallEnd:
+			toolEndIdx = i
+		case EventSteeringInjected:
+			if ev.Data["text"] != "steer: do X" {
+				t.Fatalf("STEERING_INJECTED data: %+v", ev.Data)
+			}
+			steerIdx = i
+		}
+		i++
+	}
+	if toolEndIdx == -1 {
+		t.Fatalf("expected TOOL_CALL_END event")
+	}
+	if steerIdx == -1 {
+		t.Fatalf("expected STEERING_INJECTED event")
+	}
+	if steerIdx <= toolEndIdx {
+		t.Fatalf("expected steering injection after tool round; TOOL_CALL_END=%d STEERING_INJECTED=%d", toolEndIdx, steerIdx)
+	}
+}
 
 func TestSession_ReasoningEffort_PassedThroughAndCanChange(t *testing.T) {
 	dir := t.TempDir()
@@ -487,12 +555,12 @@ type tinyProfile struct {
 	mod string
 }
 
-func (p tinyProfile) ID() string                               { return p.id }
-func (p tinyProfile) Model() string                            { return p.mod }
-func (p tinyProfile) ToolDefinitions() []llm.ToolDefinition     { return nil }
-func (p tinyProfile) SupportsParallelToolCalls() bool           { return false }
-func (p tinyProfile) ContextWindowSize() int                    { return p.cw }
-func (p tinyProfile) ProjectDocFiles() []string                 { return nil }
+func (p tinyProfile) ID() string                                             { return p.id }
+func (p tinyProfile) Model() string                                          { return p.mod }
+func (p tinyProfile) ToolDefinitions() []llm.ToolDefinition                  { return nil }
+func (p tinyProfile) SupportsParallelToolCalls() bool                        { return false }
+func (p tinyProfile) ContextWindowSize() int                                 { return p.cw }
+func (p tinyProfile) ProjectDocFiles() []string                              { return nil }
 func (p tinyProfile) BuildSystemPrompt(EnvironmentInfo, []ProjectDoc) string { return "" }
 
 func TestSession_ContextWindowAwareness_EmitsWarningOver80Percent(t *testing.T) {
