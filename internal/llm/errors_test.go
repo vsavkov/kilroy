@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -89,3 +91,62 @@ func TestErrorFromHTTPStatus_MappingAndRetryable(t *testing.T) {
 	}
 }
 
+func TestContentFilterError_ImplementsErrorInterface(t *testing.T) {
+	err := &ContentFilterError{httpErrorBase{provider: "test", statusCode: 400, message: "blocked", retryable: false}}
+	var llmErr Error
+	if !errors.As(err, &llmErr) {
+		t.Fatalf("ContentFilterError does not implement Error interface")
+	}
+	if llmErr.Provider() != "test" {
+		t.Fatalf("Provider: %q", llmErr.Provider())
+	}
+	if llmErr.Retryable() {
+		t.Fatalf("expected non-retryable")
+	}
+}
+
+func TestQuotaExceededError_ImplementsErrorInterface(t *testing.T) {
+	err := &QuotaExceededError{httpErrorBase{provider: "test", statusCode: 429, message: "quota exceeded", retryable: false}}
+	var llmErr Error
+	if !errors.As(err, &llmErr) {
+		t.Fatalf("QuotaExceededError does not implement Error interface")
+	}
+	if llmErr.Provider() != "test" {
+		t.Fatalf("Provider: %q", llmErr.Provider())
+	}
+	if llmErr.Retryable() {
+		t.Fatalf("expected non-retryable")
+	}
+}
+
+func TestErrorFromHTTPStatus_MessageBasedClassification(t *testing.T) {
+	cases := []struct {
+		name    string
+		status  int
+		message string
+		want    string
+	}{
+		{"400 content filter", 400, "content filter policy violated", "*llm.ContentFilterError"},
+		{"400 safety", 400, "blocked by safety settings", "*llm.ContentFilterError"},
+		{"400 context length", 400, "context length exceeded", "*llm.ContextLengthError"},
+		{"400 too many tokens", 400, "too many tokens in request", "*llm.ContextLengthError"},
+		{"400 quota", 400, "quota exceeded for billing account", "*llm.QuotaExceededError"},
+		{"400 billing", 400, "billing issue on account", "*llm.QuotaExceededError"},
+		{"400 not found", 400, "model does not exist", "*llm.NotFoundError"},
+		{"400 unauthorized", 400, "invalid key", "*llm.AuthenticationError"},
+		{"400 plain", 400, "bad request", "*llm.InvalidRequestError"},
+		{"422 content filter", 422, "this violates safety policy", "*llm.ContentFilterError"},
+		{"422 plain", 422, "invalid field", "*llm.InvalidRequestError"},
+		{"401 always auth", 401, "content filter something", "*llm.AuthenticationError"},
+		{"429 always rate", 429, "quota exceeded", "*llm.RateLimitError"},
+		{"404 always notfound", 404, "quota exceeded", "*llm.NotFoundError"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ErrorFromHTTPStatus("p", tc.status, tc.message, nil, nil)
+			if got := fmt.Sprintf("%T", err); got != tc.want {
+				t.Fatalf("ErrorFromHTTPStatus(%d, %q) = %s, want %s", tc.status, tc.message, got, tc.want)
+			}
+		})
+	}
+}

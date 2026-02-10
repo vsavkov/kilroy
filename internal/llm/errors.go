@@ -57,6 +57,8 @@ type AccessDeniedError struct{ httpErrorBase }
 type NotFoundError struct{ httpErrorBase }
 type RequestTimeoutError struct{ httpErrorBase }
 type ContextLengthError struct{ httpErrorBase }
+type ContentFilterError struct{ httpErrorBase }
+type QuotaExceededError struct{ httpErrorBase }
 type RateLimitError struct{ httpErrorBase }
 type ServerError struct{ httpErrorBase }
 type UnknownHTTPError struct{ httpErrorBase }
@@ -72,6 +74,10 @@ func ErrorFromHTTPStatus(provider string, statusCode int, message string, raw an
 	switch statusCode {
 	case 400, 422:
 		base.retryable = false
+		// Ambiguous status codes: use message hints for specific classification.
+		if err := classifyByMessage(base); err != nil {
+			return err
+		}
 		return &InvalidRequestError{base}
 	case 401:
 		base.retryable = false
@@ -99,6 +105,25 @@ func ErrorFromHTTPStatus(provider string, statusCode int, message string, raw an
 		base.retryable = true
 		return &UnknownHTTPError{base}
 	}
+}
+
+// classifyByMessage refines classification when status code is ambiguous
+// (primarily 400/422) and providers tunnel domain-specific failures in text.
+func classifyByMessage(base httpErrorBase) error {
+	lower := strings.ToLower(base.message)
+	switch {
+	case strings.Contains(lower, "content filter") || strings.Contains(lower, "safety"):
+		return &ContentFilterError{base}
+	case strings.Contains(lower, "context length") || strings.Contains(lower, "too many tokens"):
+		return &ContextLengthError{base}
+	case strings.Contains(lower, "quota") || strings.Contains(lower, "billing"):
+		return &QuotaExceededError{base}
+	case strings.Contains(lower, "not found") || strings.Contains(lower, "does not exist"):
+		return &NotFoundError{base}
+	case strings.Contains(lower, "unauthorized") || strings.Contains(lower, "invalid key"):
+		return &AuthenticationError{base}
+	}
+	return nil
 }
 
 // NewRequestTimeoutError constructs a non-HTTP timeout error (e.g., context deadline
