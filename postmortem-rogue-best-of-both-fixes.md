@@ -13,10 +13,10 @@ Source analyses:
 ## Spec Coverage Map
 
 - **Spec-backed now**
-- Canonical stage status file path/contract: `{logs_root}/{node_id}/status.json` (artifact contract; primary routing is in-memory by handler outcome, with status-file ingestion used only when handler outcome is not explicitly returned). Reference: attractor spec Section 5.6 + Appendix C.
+- Canonical stage status artifact path/contract: `{logs_root}/{node_id}/status.json`; stage routing remains based on handler-returned outcome values. Reference: attractor spec Section 4.5, Section 5.6, and Appendix C.
 - DOT routing/conditions/retry semantics. Reference: attractor spec Sections 3.3, 3.5, 3.7, 10.
 - Parallel branch isolation + join/error policy model. Reference: attractor spec Section 4.8.
-- Provider/model explicitness principles from unified-llm and attractor model selection. Reference: unified-llm Section 2.2; attractor Sections 2.6 and 8.
+- Provider/model explicitness principles from unified-llm and attractor model selection. Reference: unified-llm Sections 2.2, 2.7, 2.9; attractor Sections 2.6 and 8.
 - **Runtime-contract in code but under-specified**
 - Stall watchdog liveness aggregation.
 - Attempt lifecycle identifiers and heartbeat validity windows.
@@ -27,7 +27,7 @@ Source analyses:
 - Run-level cancellation precedence across parallel/subgraph flows.
 - Traversal-level deterministic cycle-break behavior.
 - Strict pin/no-failover run-config semantics.
-- Canonical outcome casing rule across attractor docs.
+- Clarify enum-vs-condition outcome casing mapping in docs (no semantic change).
 - Runtime event taxonomy contract for progress/liveness.
 
 ## Proposed Runtime Invariants (Implementation Contract)
@@ -46,15 +46,19 @@ Source analyses:
 - `run_generation`: monotonic integer incremented on each loop-restart generation of a run; included on liveness events to avoid stale-branch attribution.
 - `run_generation` reconciliation: each `loop_restart` creates a fresh physical run directory, but this counter tracks logical lineage across those generations.
 - `branch_id`: stable branch scope identifier (`main` for top-level path; deterministic fanout branch key for parallel branches).
-- `attempt_id`: deterministic identifier for a stage attempt, format `branch_id:node_id:attempt_ordinal`, where `attempt_ordinal` is 1-indexed and `1` means the initial execution (retries are `2+`).
+- `attempt_id`: opaque per-attempt identifier (do not encode branch naming semantics into this field).
+- Companion fields for diagnostics/filtering:
+  - `attempt_branch_id`
+  - `attempt_node_id`
+  - `attempt_ordinal` (1-indexed; `1` is initial execution, retries are `2+`)
 - `terminal_artifact`: top-level `final.json` at run logs root, schema aligned with `internal/attractor/runtime/final.go`:
   - `timestamp`
   - `status` (`success|fail`)
   - `run_id`
   - `final_git_commit_sha`
   - `failure_reason` (optional)
-  - `cxdb_context_id` (always present in current struct; may be empty string when not populated)
-  - `cxdb_head_turn_id` (always present in current struct; may be empty string when not populated)
+  - `cxdb_context_id` (implementation-specific extension; may be empty string)
+  - `cxdb_head_turn_id` (implementation-specific extension; may be empty string)
 - Terminal status mapping (run-level, intentionally binary):
   - run `success` only when pipeline reaches terminal success state with goal-gate constraints satisfied (stage-level acceptance includes `SUCCESS` and `PARTIAL_SUCCESS`)
   - stage-level `PARTIAL_SUCCESS` that satisfies routing/goal-gate checks maps to run-level `success`
@@ -66,11 +70,9 @@ Source analyses:
 ## Runtime Event Contract (Used By This Plan, Then Codified)
 
 The events below are treated as runtime implementation contracts for this fix plan and must later be codified in spec deltas.
-These `api_*` event names are new events to introduce (they do not exist today).
-Naming bridge:
-- `api_tool_call_start` corresponds to coding-agent-loop `TOOL_CALL_START`.
-- `api_tool_call_end` corresponds to coding-agent-loop `TOOL_CALL_END`.
-- `api_assistant_text_delta` corresponds to coding-agent-loop `ASSISTANT_TEXT_DELTA`.
+These `api_*` event names are new attractor runtime events (they do not exist today).
+They are derived from stage-local LLM/tool activity but are not a 1:1 reuse of coding-agent-loop `EventKind` semantics.
+Watchdog liveness must remain primarily attempt/branch scoped; `api_*` events are secondary supporting signals only.
 
 Proposed liveness event set for watchdog:
 - `stage_attempt_start`
@@ -87,20 +89,22 @@ Proposed liveness event set for watchdog:
 - Do not change DOT condition semantics or retry/fallback routing behavior.
 - Preserve join policy semantics (`wait_all`, `k_of_n`, `first_success`, `quorum`) and error policy semantics (`fail_fast`, `continue`, `ignore`) while run is live.
 - Run-level cancellation precedence rule (runtime policy pending spec delta): cancellation always stops further work regardless of branch `error_policy`; `error_policy` only governs branch-local failure handling before cancellation.
-- Resolve attractor status-case inconsistency explicitly: Section 5.2 enum style vs Section 10.3 lowercase outcomes.
-  - This plan does not change condition evaluator behavior.
-  - Any casing-policy change to condition matching is treated as a separate spec delta and migration.
-  - Spec/doc cleanup: implementation already uses lowercase canonical status values; align spec language to that reality.
+- Preserve intentional casing split from attractor spec:
+  - Attractor spec Section 5.2 presents StageStatus symbols as uppercase (`SUCCESS`, `FAIL`, etc.).
+  - Runtime implementation constants in `internal/attractor/runtime/status.go` are lowercase string values (`success`, `fail`, etc.).
+  - Condition expressions compare lowercase outcome strings (Section 10.3/10.4).
+  - This plan requires only documentation clarification for the mapping; no condition evaluator behavior change.
 
 ## P0 (Immediate)
 
-- Harden status ingestion first (precondition for reliable liveness/routing).
+- [Spec-backed core + runtime-compat extension] Harden status ingestion first (precondition for reliable liveness/routing).
   - Precedence:
   - canonical `{logs_root}/{node_id}/status.json`
   - fallback `{worktree}/status.json` (legacy compatibility)
   - fallback `{worktree}/.ai/status.json` (legacy compatibility)
   - Rules:
   - fallback accepted only when canonical missing
+  - canonical ownership mismatch (when ownership fields are present) fails deterministically
   - ownership check must pass when ownership fields are present
   - ownership fields (runtime extension): `status_owner_node_id`, `status_owner_attempt_id`, `status_owner_run_generation`
   - when ownership fields are absent, fallback acceptance requires path-scoped ownership (current stage path only)
@@ -108,7 +112,7 @@ Proposed liveness event set for watchdog:
   - accepted fallback is atomically copied to canonical path with provenance metadata
   - canonical status writes must be temp-file + atomic rename to avoid partial-read races
   - Done when: deterministic source selection is observable in logs/events.
-- Make watchdog liveness fanout-aware.
+- [Runtime-contract, new capability pending spec delta] Make watchdog liveness fanout-aware.
   - Done when: no false `stall_watchdog_timeout` while any active branch emits accepted liveness events.
   - Coverage must include join policies: `wait_all`, `k_of_n`, `first_success`, `quorum`.
   - Implementation note: runtime currently does not implement all spec join policies; where unsupported today, add guardrail tests that lock current behavior and add explicit TODO gates before enabling policy-specific watchdog logic.
@@ -117,16 +121,16 @@ Proposed liveness event set for watchdog:
   - `k_of_n` and `quorum`: liveness from undecided branches resets parent watchdog until threshold is reached and branch set is finalized.
   - `first_success`: once winner selected and cancellation dispatched, only winner/join-path liveness counts; canceled-branch liveness is ignored after cancellation acknowledgment.
   - Cancellation acknowledgment definition: branch context canceled and branch emits terminal branch completion/exit signal (no further stage attempts permitted).
-- Stop heartbeat leaks with attempt scoping.
+- [Runtime-contract] Stop heartbeat leaks with attempt scoping.
   - Done when: zero `stage_heartbeat` after matching attempt-end for identical `(node_id, attempt_id, run_generation)`.
-- Add cancellation guards in subgraph/parallel traversal.
+- [Runtime-contract + spec-delta documentation needed] Add cancellation guards in subgraph/parallel traversal.
   - Done when: after run cancel, no new attempts start and traversal exits without selecting another edge.
   - Clarification: `error_policy=ignore` never suppresses run-level cancellation.
-- Implement deterministic cycle-break handling in subgraph path (new capability; parity target with top-level loop policy).
+- [Runtime-contract, new capability pending spec delta] Implement deterministic cycle-break handling in subgraph path (parity target with top-level loop policy).
   - Done when: deterministic signature repetition triggers breaker using configured `loop_restart_signature_limit`.
-- Preserve failure causality through routing.
+- [Spec-backed] Preserve failure causality through routing.
   - Done when: terminal outputs retain upstream raw reason; normalized signature is separate metadata.
-- Guarantee terminal artifact persistence for all controllable terminal paths.
+- [Runtime-contract + spec-delta target] Guarantee terminal artifact persistence for all controllable terminal paths.
   - Done when: `final.json` is persisted on success/fail/cancel/watchdog/internal fatal paths (best effort excludes uncatchable `SIGKILL`).
   - Write contract: `final.json` persistence uses temp-file + atomic rename for consistency with status artifact durability expectations.
   - Current code gap to fix explicitly: `runtime/final.go` currently writes via direct `os.WriteFile`; migrate to atomic temp+rename write path.
@@ -149,8 +153,11 @@ Proposed liveness event set for watchdog:
   - `NetworkError`
   - `StreamError`
   - `ConfigurationError`
-  - `InvalidToolCallError` (out-of-scope for attractor engine layer; document explicitly)
-  - `NoObjectGeneratedError` (out-of-scope for attractor engine layer; document explicitly)
+  - `InvalidToolCallError`
+  - `NoObjectGeneratedError`
+  - Mapping notes:
+  - `InvalidToolCallError` must map to a deterministic, diagnosable stage failure path (with explicit retry policy) when tool-call decoding fails.
+  - `NoObjectGeneratedError` must map to deterministic stage failure when structured output mode is active; if encountered while structured output mode is inactive, classify as internal contract violation.
   - Done when: terminal classing distinguishes cancel/stall/runtime faults from provider deterministic/transient categories using full mapping.
   - Existing behavior baseline to preserve: `ContentFilterError` remains non-retryable/deterministic unless a future spec-delta policy explicitly changes it.
 - Normalize failure signatures only for breaker decisions.
@@ -165,6 +172,10 @@ Proposed liveness event set for watchdog:
 
 ## P2 (Tests: Unit + Integration + E2E)
 
+- Regression gate for existing behavior (required in addition to new-path tests).
+  - Pre- and post-change full attractor regression run: `go test ./internal/attractor/...`.
+  - Preserve existing semantics for routing, goal-gate behavior, and parallel join/error policy in current supported modes.
+  - Expand existing suites where touched: `engine_test.go`, `edge_selection_test.go`, `goal_gate_test.go`, `parallel_test.go`.
 - Watchdog fanout liveness.
   - Unit: liveness aggregator accepts branch events and resets idle timer.
   - Integration: no false timeout with active branch signals.
@@ -184,6 +195,7 @@ Proposed liveness event set for watchdog:
   - Unit: precedence + ownership decision table.
   - Decision table minimum cases:
   - canonical present + valid -> choose canonical
+  - canonical present + ownership mismatch (ownership fields present) -> fail deterministically with ownership diagnostic
   - canonical present + corrupt/unparseable -> fail deterministically with explicit ingestion diagnostic
   - canonical legacy-format + fallback canonical-format -> canonical still wins and parses through legacy decoder path
   - canonical canonical-format + fallback legacy-format -> canonical still wins
@@ -226,7 +238,7 @@ Proposed liveness event set for watchdog:
 - Terminal artifact (`final.json`) contract and required schema.
 - Legacy fallback status contract (`worktree/status.json`, `.ai/status.json`) + deprecation plan.
 - Explicit pinned-model failover policy contract.
-- Canonical outcome casing contract.
+- Explicit enum-to-condition casing mapping documentation (uppercase StageStatus enum vs lowercase condition-language strings).
 - Graph attribute contract for `loop_restart_signature_limit` (name, type, default, semantics).
 
 ## Implementation Order (Risk-Aware)
@@ -243,14 +255,14 @@ Proposed liveness event set for watchdog:
 
 Implementation:
 - `internal/attractor/engine/handlers.go`
-- `internal/attractor/runtime/status.go` (status parsing/normalization only; no file I/O)
+- `internal/attractor/runtime/status.go` (status parsing/normalization and outcome decoding; ingestion file I/O call sites live in engine/handler paths)
 - `internal/attractor/engine/progress.go`
-- `internal/attractor/engine/engine.go`
+- `internal/attractor/engine/engine.go` (checkpoint/live artifact I/O paths; atomic-write migration site)
 - `internal/attractor/engine/subgraph.go`
 - `internal/attractor/engine/parallel_handlers.go`
 - `internal/attractor/engine/codergen_router.go`
 - `internal/attractor/runtime/final.go`
-- `internal/attractor/runtime/checkpoint.go`
+- `internal/attractor/runtime/checkpoint.go` (checkpoint schema + Save/Load file I/O; atomic-write migration target)
 
 Tests:
 - `internal/attractor/engine/engine_stall_watchdog_test.go`
@@ -269,3 +281,11 @@ Tests:
 - `final.json` persisted for all controllable terminal outcomes.
 - No implicit fallback when pin/no-failover policy forbids it.
 - No regression in canonical status/routing semantics.
+
+## Change Management Requirements
+
+- Commit messages for this fix stream must be delta-oriented (what changed since prior commit), not cumulative-state summaries.
+- Each implementation commit must include:
+  - exact behavior delta;
+  - touched invariants/spec references;
+  - tests added/updated and executed.
