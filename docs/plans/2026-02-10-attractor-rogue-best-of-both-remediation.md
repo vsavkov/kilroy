@@ -917,3 +917,69 @@ git commit -m "plan: record regression evidence and rogue-fast validation run de
 ```bash
 git checkout -b plan/rogue-best-of-both-remediation-20260210
 ```
+
+## Execution Evidence (2026-02-10)
+
+### Task 11 Checklist
+
+- [x] Canonical vs fallback status ingestion contract documented
+- [x] Fanout-aware watchdog liveness contract documented
+- [x] Subgraph cancellation and deterministic cycle-break parity documented
+- [x] Canceled failure class contract documented
+- [x] Explicit no-failover semantics for `failover: []` documented
+
+Grep verification:
+
+```bash
+rg -n 'legacy status fallback|fanout liveness|canceled failure class|loop_restart_signature_limit|failover:\s*\[\]' docs/strongdm/attractor
+```
+
+Matched in:
+- `docs/strongdm/attractor/attractor-spec.md`
+- `docs/strongdm/attractor/coding-agent-loop-spec.md`
+- `docs/strongdm/attractor/unified-llm-spec.md`
+
+### Task 12 Checklist
+
+- [x] `go test ./internal/attractor/... ./internal/llm/... -count=1`
+- [x] `go build -o ./kilroy ./cmd/kilroy`
+- [x] `./kilroy attractor validate --graph demo/rogue/rogue_fast.dot`
+- [x] One rogue-fast validation run recorded (`run_id` + artifact paths)
+
+Command evidence:
+
+```bash
+go test ./internal/attractor/... ./internal/llm/... -count=1
+```
+
+- Result: PASS (`internal/attractor/engine` and all targeted `internal/llm/*` packages passed)
+
+```bash
+test -f demo/rogue/rogue_fast.dot
+go build -o ./kilroy ./cmd/kilroy
+./kilroy attractor validate --graph demo/rogue/rogue_fast.dot
+```
+
+- Result: PASS (`ok: rogue_fast.dot`)
+
+Validation execution evidence (test-shim dry run):
+
+- Date/time (UTC): 2026-02-10T21:37
+- Config: `/tmp/rogue-fast-test-shim-20260210.yaml`
+- Command:
+
+```bash
+KIMI_API_KEY=dummy ZAI_API_KEY=dummy ./kilroy attractor run --detach --graph demo/rogue/rogue_fast.dot --config /tmp/rogue-fast-test-shim-20260210.yaml --allow-test-shim --run-id rogue-fast-validation-test-shim-20260210-c --logs-root /tmp/kilroy-rogue-fast-validation-20260210-c
+```
+
+- Run ID: `rogue-fast-validation-test-shim-20260210-c`
+- Logs root: `/tmp/kilroy-rogue-fast-validation-20260210-c`
+- Artifacts observed:
+  - `live.json` present
+  - `progress.ndjson` present
+  - `checkpoint.json` present
+- Detached run stopped cleanly via:
+
+```bash
+./kilroy attractor stop --logs-root /tmp/kilroy-rogue-fast-validation-20260210-c --grace-ms 500 --force
+```
