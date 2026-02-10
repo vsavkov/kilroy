@@ -176,6 +176,16 @@ func TestClassifyAPIError(t *testing.T) {
 			wantClass: failureClassDeterministic,
 		},
 		{
+			name:      "ContentFilterError_400",
+			err:       llm.ErrorFromHTTPStatus("openai", 400, "blocked by content filter policy", nil, nil),
+			wantClass: failureClassDeterministic,
+		},
+		{
+			name:      "QuotaExceededError_400",
+			err:       llm.ErrorFromHTTPStatus("openai", 400, "quota exceeded for account", nil, nil),
+			wantClass: failureClassDeterministic,
+		},
+		{
 			name:      "InvalidRequestError_422",
 			err:       llm.ErrorFromHTTPStatus("openai", 422, "unprocessable", nil, nil),
 			wantClass: failureClassDeterministic,

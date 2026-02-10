@@ -462,6 +462,10 @@ func shouldFailoverLLMError(err error) bool {
 	if errors.As(err, &cle) {
 		return false
 	}
+	var cfe *llm.ContentFilterError
+	if errors.As(err, &cfe) {
+		return false
+	}
 	// Timeouts, rate limits, server errors, and unknown transport errors can be
 	// provider-specific; failover is often better than hard failure.
 	return true

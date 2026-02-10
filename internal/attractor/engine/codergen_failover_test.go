@@ -252,6 +252,20 @@ func TestShouldFailoverLLMError_NotFoundDoesNotFailover(t *testing.T) {
 	}
 }
 
+func TestShouldFailoverLLMError_ContentFilterDoesNotFailover(t *testing.T) {
+	err := llm.ErrorFromHTTPStatus("openai", 400, "blocked by content filter policy", nil, nil)
+	if shouldFailoverLLMError(err) {
+		t.Fatalf("content filter failures should not trigger failover")
+	}
+}
+
+func TestShouldFailoverLLMError_QuotaExceededDoesFailover(t *testing.T) {
+	err := llm.ErrorFromHTTPStatus("openai", 400, "quota exceeded for account", nil, nil)
+	if !shouldFailoverLLMError(err) {
+		t.Fatalf("quota failures should trigger failover")
+	}
+}
+
 func TestShouldFailoverLLMError_TurnLimitDoesNotFailover(t *testing.T) {
 	if shouldFailoverLLMError(agent.ErrTurnLimit) {
 		t.Fatalf("agent.ErrTurnLimit should not trigger failover")
