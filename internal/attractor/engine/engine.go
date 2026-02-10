@@ -309,6 +309,11 @@ func (e *Engine) run(ctx context.Context) (res *Result, err error) {
 		e.Context.Set("graph."+k, v)
 	}
 	e.Context.Set("graph.goal", e.Graph.Attrs["goal"])
+	e.Context.Set("base_sha", baseSHA)
+
+	// Expand $base_sha in prompts now that the base SHA is known.
+	// ($goal was already expanded at parse/prepare time.)
+	expandBaseSHA(e.Graph, baseSHA)
 
 	// Capture the original logs root for loop_restart (attractor-spec §3.2 Step 7).
 	e.baseLogsRoot = e.LogsRoot
@@ -666,6 +671,7 @@ func (e *Engine) loopRestart(ctx context.Context, targetNodeID string, fromNodeI
 		e.Context.Set("graph."+k, v)
 	}
 	e.Context.Set("graph.goal", e.Graph.Attrs["goal"])
+	e.Context.Set("base_sha", e.baseSHA)
 
 	// Reset fidelity state.
 	e.incomingEdge = nil
@@ -1151,6 +1157,25 @@ func expandGoal(g *model.Graph) {
 		}
 		if p := n.Attrs["llm_prompt"]; strings.Contains(p, "$goal") {
 			n.Attrs["llm_prompt"] = strings.ReplaceAll(p, "$goal", goal)
+		}
+	}
+}
+
+// expandBaseSHA replaces $base_sha placeholders in all node prompts. Called after
+// the run's base SHA is known (later than $goal expansion which happens at parse time).
+func expandBaseSHA(g *model.Graph, baseSHA string) {
+	if baseSHA == "" {
+		return
+	}
+	for _, n := range g.Nodes {
+		if n == nil {
+			continue
+		}
+		if p := n.Attrs["prompt"]; strings.Contains(p, "$base_sha") {
+			n.Attrs["prompt"] = strings.ReplaceAll(p, "$base_sha", baseSHA)
+		}
+		if p := n.Attrs["llm_prompt"]; strings.Contains(p, "$base_sha") {
+			n.Attrs["llm_prompt"] = strings.ReplaceAll(p, "$base_sha", baseSHA)
 		}
 	}
 }

@@ -143,6 +143,21 @@ func FastForwardFFOnly(worktreeDir, otherRef string) error {
 	return MergeFastForwardOnly(worktreeDir, otherRef)
 }
 
+// DiffNameOnly returns file paths changed between baseRef and HEAD in the given directory.
+func DiffNameOnly(dir, baseRef string) ([]string, error) {
+	out, _, err := runGit(dir, "diff", "--name-only", baseRef)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, line := range strings.Split(out, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			files = append(files, trimmed)
+		}
+	}
+	return files, nil
+}
+
 func ensureUserIdentity(worktreeDir string) error {
 	name, _, err := runGit(worktreeDir, "config", "--get", "user.name")
 	if err != nil {

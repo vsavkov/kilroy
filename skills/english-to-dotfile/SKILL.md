@@ -430,6 +430,13 @@ Every prompt must be **self-contained**. The agent executing it has no memory of
 Validation scope policy:
 - Required checks must be scoped to the project/module paths created by the pipeline (for Go, prefer `./cmd/<app>` + `./pkg/<app>/...`).
 - Do NOT default to repo-wide `./...` required checks in monorepos/sandboxed environments unless the user explicitly requests full-repo validation.
+- Lint commands in verify nodes MUST be scoped to files changed by the current feature, not the entire project. Pre-existing lint errors in unrelated files will cause infinite retry loops.
+  - Use `$base_sha` (the commit SHA at run start, expanded by the engine) to identify changed files.
+  - TypeScript/JS: `git diff --name-only $base_sha -- '*.ts' '*.tsx' '*.js' '*.jsx' | xargs -r npx eslint`
+  - Go: scope to project paths (`./cmd/<app>/...`, `./pkg/<app>/...`), not `./...`
+  - Python: `git diff --name-only $base_sha -- '*.py' | xargs -r ruff check`
+- Build and test commands may run project-wide (failures in changed code are real problems).
+- If no files match the lint filter, skip lint and report success.
 - Repo-wide network-dependent checks are advisory. If attempted and blocked by DNS/proxy/network policy, record them as skipped in `.ai/` output and continue based on scoped required checks.
 
 Implementation prompt template:
@@ -457,9 +464,13 @@ Verify [UNIT_DESCRIPTION] was implemented correctly.
 
 Run:
 1. `[BUILD_COMMAND]`
-2. `[LINT_COMMAND]`
+2. Lint ONLY files changed by this feature (do NOT lint the entire project):
+   `git diff --name-only $base_sha -- [FILE_EXTENSIONS] | xargs -r [LINT_COMMAND]`
+   If no files match, skip lint and note "no changed files to lint" in results.
 3. `[TEST_COMMAND]`
 4. [DOMAIN_SPECIFIC_CHECKS]
+
+IMPORTANT: Pre-existing lint errors in unrelated files must not block this feature.
 
 Write results to .ai/verify_[NODE_ID].md.
 Write status.json: outcome=success if ALL pass, outcome=fail with details.
@@ -560,7 +571,7 @@ Common repairs (use validator output; do not guess blindly):
 | `label` | Display name (defaults to node ID) |
 | `shape` | Handler type: `Mdiamond` (start), `Msquare` (exit), `box` (codergen), `diamond` (conditional), `hexagon` (wait.human), `component` (parallel fan-out), `tripleoctagon` (fan-in), `parallelogram` (tool/shell) |
 | `type` | Explicit handler override (takes precedence over shape) |
-| `prompt` | LLM instruction. Supports `$goal` expansion. Also accepted as `llm_prompt` (alias). |
+| `prompt` | LLM instruction. Supports `$goal` and `$base_sha` expansion. Also accepted as `llm_prompt` (alias). |
 | `class` | Comma-separated classes for model stylesheet targeting (e.g., `"hard"`, `"verify"`, `"review"`) |
 | `max_retries` | Additional attempts beyond initial execution. `max_retries=3` = 4 total. |
 | `goal_gate` | `true` = node must succeed before pipeline can exit |
@@ -621,6 +632,7 @@ Custom outcome values work: `outcome=port`, `outcome=skip`, `outcome=needs_fix`.
 15. **Missing file-based handoff.** Every node that produces output for downstream nodes must write it to a named `.ai/` file. Every node that consumes prior output must be told which files to read. Relying on context variables for large data (plans, reviews, logs) does not work — use the filesystem.
 16. **Binary-only outcomes in steering nodes.** If a workflow has more than two paths (e.g., process/skip/done), define custom outcome values in the prompt and route on them with conditions. Don't force everything into success/fail.
 17. **Unscoped Go monorepo checks.** Do NOT make repo-wide `go build ./...`, `go vet ./...`, or `go test ./...` required by default. Scope required checks to generated project paths (e.g., `./cmd/<app>`, `./pkg/<app>/...`). Treat blocked repo-wide network checks as advisory/skipped.
+18. **Unscoped lint in verify nodes.** Do NOT use `npm run lint`, `ruff check .`, or any project-wide lint command in verify nodes. Scope lint to changed files using `git diff --name-only $base_sha`. Pre-existing errors in unrelated files cause infinite retry loops where the agent burns tokens trying to fix code it didn't write.
 
 ## Notes on Reference Dotfile Conventions
 
@@ -666,7 +678,7 @@ digraph linkcheck {
 
 	    verify_setup [
 	        shape=box, class="verify",
-	        prompt="Verify project setup.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. go vet ./cmd/linkcheck ./pkg/linkcheck/...\n3. Check go.mod and cmd/linkcheck exist\n4. Guardrail: `find . -name go.mod` should include only `./go.mod`\n\nWrite results to .ai/verify_setup.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
+	        prompt="Verify project setup.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. Lint only changed files: git diff --name-only $base_sha -- '*.go' | xargs -r go vet (skip if no files match)\n3. Check go.mod and cmd/linkcheck exist\n4. Guardrail: `find . -name go.mod` should include only `./go.mod`\n\nIMPORTANT: Do NOT run project-wide lint. Only lint files changed by this feature.\n\nWrite results to .ai/verify_setup.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
 	    ]
 
     check_setup [shape=diamond, label="Setup OK?"]
@@ -679,7 +691,7 @@ digraph linkcheck {
 
 	    verify_core [
 	        shape=box, class="verify",
-	        prompt="Verify core implementation.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. go vet ./cmd/linkcheck ./pkg/linkcheck/...\n3. go test ./cmd/linkcheck/... ./pkg/linkcheck/... -v\n\nWrite results to .ai/verify_core.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
+	        prompt="Verify core implementation.\n\nRun:\n1. go build ./cmd/linkcheck ./pkg/linkcheck/...\n2. Lint only changed files: git diff --name-only $base_sha -- '*.go' | xargs -r go vet (skip if no files match)\n3. go test ./cmd/linkcheck/... ./pkg/linkcheck/... -v\n\nIMPORTANT: Do NOT run project-wide lint. Only lint files changed by this feature.\n\nWrite results to .ai/verify_core.md.\nWrite status.json: outcome=success if all pass, outcome=fail with details."
 	    ]
 
     check_core [shape=diamond, label="Core OK?"]
