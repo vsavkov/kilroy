@@ -152,9 +152,7 @@ func (a *Adapter) Complete(ctx context.Context, req llm.Request) (llm.Response, 
 	if includeTools && len(req.Tools) > 0 {
 		tools := toAnthropicTools(req.Tools)
 		if autoCache {
-			for i := range tools {
-				tools[i]["cache_control"] = map[string]any{"type": "ephemeral"}
-			}
+			addToolCacheControlBreakpoint(tools)
 		}
 		body["tools"] = tools
 	}
@@ -329,9 +327,7 @@ func (a *Adapter) Stream(ctx context.Context, req llm.Request) (llm.Stream, erro
 	if includeTools && len(req.Tools) > 0 {
 		tools := toAnthropicTools(req.Tools)
 		if autoCache {
-			for i := range tools {
-				tools[i]["cache_control"] = map[string]any{"type": "ephemeral"}
-			}
+			addToolCacheControlBreakpoint(tools)
 		}
 		body["tools"] = tools
 	}
@@ -1186,6 +1182,20 @@ func addCacheControlBreakpoint(messages []map[string]any) {
 	default:
 		return
 	}
+}
+
+func addToolCacheControlBreakpoint(tools []map[string]any) {
+	if len(tools) == 0 {
+		return
+	}
+	// Anthropic allows at most four cache_control blocks per request.
+	// One checkpoint on the last tool caches the entire tool-definition prefix
+	// without exhausting the limit on large toolsets.
+	idx := len(tools) - 1
+	if _, exists := tools[idx]["cache_control"]; exists {
+		return
+	}
+	tools[idx]["cache_control"] = map[string]any{"type": "ephemeral"}
 }
 
 func parseUsage(u map[string]any) llm.Usage {

@@ -1143,6 +1143,117 @@ func TestAdapter_PromptCaching_AutoCacheDefaultAndDisable(t *testing.T) {
 		}
 	})
 
+	t.Run("large_toolset_uses_sparse_cache_control_breakpoints", func(t *testing.T) {
+		var gotBody map[string]any
+		gotBeta := ""
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotBeta = r.Header.Get("anthropic-beta")
+			b, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			_ = json.Unmarshal(b, &gotBody)
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+  "id": "msg_1",
+  "model": "claude-test",
+  "content": [{"type":"text","text":"ok"}],
+  "stop_reason": "end_turn",
+  "usage": {"input_tokens": 1, "output_tokens": 1}
+}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		tools := make([]llm.ToolDefinition, 0, 10)
+		for i := 0; i < 10; i++ {
+			tools = append(tools, llm.ToolDefinition{
+				Name:        fmt.Sprintf("t%d", i+1),
+				Description: "d",
+				Parameters: map[string]any{
+					"type": "object",
+				},
+			})
+		}
+
+		a := &Adapter{APIKey: "k", BaseURL: srv.URL, Client: srv.Client()}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		_, err := a.Complete(ctx, llm.Request{
+			Model: "claude-test",
+			Messages: []llm.Message{
+				llm.System("sys"),
+				llm.User("u1"),
+				llm.Assistant("a1"),
+				llm.User("u2"),
+			},
+			Tools: tools,
+		})
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		if gotBeta != "prompt-caching-2024-07-31" {
+			t.Fatalf("anthropic-beta: got %q want %q", gotBeta, "prompt-caching-2024-07-31")
+		}
+
+		totalCC := 0
+		sysBlocks, ok := gotBody["system"].([]any)
+		if !ok || len(sysBlocks) == 0 {
+			t.Fatalf("system blocks: %#v", gotBody["system"])
+		}
+		if sb0, _ := sysBlocks[0].(map[string]any); sb0 != nil {
+			if cc, _ := sb0["cache_control"].(map[string]any); cc["type"] == "ephemeral" {
+				totalCC++
+			}
+		}
+
+		toolCC := 0
+		toolsAny, ok := gotBody["tools"].([]any)
+		if !ok || len(toolsAny) != 10 {
+			t.Fatalf("tools: %#v", gotBody["tools"])
+		}
+		for _, tAny := range toolsAny {
+			tm, _ := tAny.(map[string]any)
+			if tm == nil {
+				continue
+			}
+			if cc, _ := tm["cache_control"].(map[string]any); cc["type"] == "ephemeral" {
+				toolCC++
+				totalCC++
+			}
+		}
+		if toolCC != 1 {
+			t.Fatalf("expected exactly 1 tool cache_control breakpoint, got %d", toolCC)
+		}
+
+		msgs, ok := gotBody["messages"].([]any)
+		if !ok || len(msgs) == 0 {
+			t.Fatalf("messages: %#v", gotBody["messages"])
+		}
+		for _, mAny := range msgs {
+			m, _ := mAny.(map[string]any)
+			if m == nil {
+				continue
+			}
+			blocks, _ := m["content"].([]any)
+			for _, bAny := range blocks {
+				bm, _ := bAny.(map[string]any)
+				if bm == nil {
+					continue
+				}
+				if cc, _ := bm["cache_control"].(map[string]any); cc["type"] == "ephemeral" {
+					totalCC++
+				}
+			}
+		}
+		if totalCC != 3 {
+			t.Fatalf("expected 3 cache_control breakpoints (tools+system+prefix), got %d", totalCC)
+		}
+		if totalCC > 4 {
+			t.Fatalf("expected <=4 cache_control breakpoints, got %d", totalCC)
+		}
+	})
+
 	t.Run("disabled_does_not_inject_cache_control_or_beta", func(t *testing.T) {
 		var gotBody map[string]any
 		gotBeta := ""
