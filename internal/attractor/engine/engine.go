@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	rdebug "runtime/debug"
 	"sort"
@@ -751,6 +750,7 @@ func (e *Engine) executeNode(ctx context.Context, node *model.Node) (runtime.Out
 	// attempt left a status.json behind and the handler doesn't write a new one, we'd incorrectly
 	// treat the stale file as authoritative. Clear it before each attempt.
 	_ = os.Remove(filepath.Join(stageDir, "status.json"))
+	_ = os.Remove(filepath.Join(stageDir, "partial_status.json"))
 	var (
 		out runtime.Outcome
 		err error
@@ -812,7 +812,7 @@ func (e *Engine) executeNode(ctx context.Context, node *model.Node) (runtime.Out
 		}
 		out.Meta["timeout"] = true
 		if timeout := effectiveStageTimeout(node, e.Options.StageTimeout); timeout > 0 {
-			out.Meta["timeout_seconds"] = int(timeout.Seconds())
+			out.Meta["timeout_ms"] = timeout.Milliseconds()
 		}
 		partial := e.harvestPartialStatus(stageDir, node)
 		if partial != nil {
@@ -843,7 +843,7 @@ func (e *Engine) executeNode(ctx context.Context, node *model.Node) (runtime.Out
 
 // harvestPartialStatus checks the worktree after a timeout to determine what
 // state the node left behind. This is best-effort diagnostic data — it never
-// blocks or fails the run.
+// blocks or fails the run. Uses a 10-second timeout to avoid blocking on slow git ops.
 func (e *Engine) harvestPartialStatus(stageDir string, node *model.Node) map[string]any {
 	if e.WorktreeDir == "" {
 		return nil
@@ -852,17 +852,23 @@ func (e *Engine) harvestPartialStatus(stageDir string, node *model.Node) map[str
 		"node_id":   node.ID,
 		"harvested": true,
 	}
-	// Count files changed in worktree relative to HEAD.
-	diffOut, err := exec.CommandContext(context.Background(), "git", "-C", e.WorktreeDir, "diff", "--name-only", "HEAD").Output()
-	if err == nil {
-		lines := strings.Split(strings.TrimSpace(string(diffOut)), "\n")
-		changed := 0
-		for _, l := range lines {
-			if strings.TrimSpace(l) != "" {
-				changed++
-			}
+	// Count files changed in worktree relative to HEAD, with a bounded timeout.
+	type diffResult struct {
+		files []string
+		err   error
+	}
+	ch := make(chan diffResult, 1)
+	go func() {
+		files, err := gitutil.DiffNameOnly(e.WorktreeDir, "HEAD")
+		ch <- diffResult{files, err}
+	}()
+	select {
+	case r := <-ch:
+		if r.err == nil {
+			partial["files_changed"] = len(r.files)
 		}
-		partial["files_changed"] = changed
+	case <-time.After(10 * time.Second):
+		partial["harvest_timeout"] = true
 	}
 	return partial
 }
