@@ -682,6 +682,9 @@ func (e *Engine) loopRestart(ctx context.Context, targetNodeID string, fromNodeI
 		return nil, fmt.Errorf("loop_restart limit exceeded (%d restarts, max %d)", e.restartCount, maxRestarts)
 	}
 
+	// Best-effort push before starting fresh iteration so remote has completed work.
+	e.gitPushIfConfigured()
+
 	// Create a fresh log sub-directory for this iteration.
 	newLogsRoot := filepath.Join(e.baseLogsRoot, fmt.Sprintf("restart-%d", e.restartCount))
 	if err := os.MkdirAll(newLogsRoot, 0o755); err != nil {
@@ -1187,6 +1190,49 @@ func (e *Engine) persistTerminalOutcome(ctx context.Context, final runtime.Final
 	}
 
 	e.terminalOutcomePersisted = true
+
+	// Best-effort push after terminal outcome so remote has final state.
+	e.gitPushIfConfigured()
+}
+
+// gitPushIfConfigured pushes the run branch to the configured remote.
+// It is best-effort: failures are logged as warnings but never abort the run.
+func (e *Engine) gitPushIfConfigured() {
+	if e == nil || e.RunConfig == nil {
+		return
+	}
+	remote := strings.TrimSpace(e.RunConfig.Git.PushRemote)
+	if remote == "" {
+		return
+	}
+	branch := strings.TrimSpace(e.RunBranch)
+	if branch == "" {
+		return
+	}
+	repoDir := strings.TrimSpace(e.Options.RepoPath)
+	if repoDir == "" {
+		return
+	}
+	e.appendProgress(map[string]any{
+		"event":  "git_push_start",
+		"remote": remote,
+		"branch": branch,
+	})
+	if err := gitutil.PushBranch(repoDir, remote, branch); err != nil {
+		e.Warn(fmt.Sprintf("git push %s %s: %v", remote, branch, err))
+		e.appendProgress(map[string]any{
+			"event":  "git_push_failed",
+			"remote": remote,
+			"branch": branch,
+			"error":  err.Error(),
+		})
+		return
+	}
+	e.appendProgress(map[string]any{
+		"event":  "git_push_ok",
+		"remote": remote,
+		"branch": branch,
+	})
 }
 
 func (e *Engine) finalOutcomePaths() []string {

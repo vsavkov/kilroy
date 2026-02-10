@@ -132,6 +132,13 @@ func CommitAllowEmpty(worktreeDir, message string) (string, error) {
 	return HeadSHA(worktreeDir)
 }
 
+// PushBranch pushes a branch to the specified remote.
+// It is a best-effort operation; failures are returned but should not abort a run.
+func PushBranch(repoDir, remote, branch string) error {
+	_, _, err := runGit(repoDir, "push", remote, branch)
+	return err
+}
+
 func MergeFastForwardOnly(worktreeDir, otherRef string) error {
 	_, _, err := runGit(worktreeDir, "merge", "--ff-only", otherRef)
 	return err

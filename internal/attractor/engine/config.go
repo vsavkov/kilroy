@@ -95,6 +95,7 @@ type RunConfigFile struct {
 		RequireClean    *bool  `json:"require_clean,omitempty" yaml:"require_clean,omitempty"`
 		RunBranchPrefix string `json:"run_branch_prefix" yaml:"run_branch_prefix"`
 		CommitPerNode   bool   `json:"commit_per_node" yaml:"commit_per_node"`
+		PushRemote      string `json:"push_remote,omitempty" yaml:"push_remote,omitempty"`
 	} `json:"git" yaml:"git"`
 
 	RuntimePolicy RuntimePolicyConfig `json:"runtime_policy,omitempty" yaml:"runtime_policy,omitempty"`
