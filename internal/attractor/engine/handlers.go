@@ -421,12 +421,6 @@ func (h *ToolHandler) Execute(ctx context.Context, execCtx *Execution, node *mod
 		return runtime.Outcome{
 			Status:        runtime.StatusFail,
 			FailureReason: fmt.Sprintf("tool_command timed out after %s", timeout),
-			Meta: map[string]any{
-				"failure_class": failureClassTransientInfra,
-			},
-			ContextUpdates: map[string]any{
-				"failure_class": failureClassTransientInfra,
-			},
 		}, nil
 	}
 
@@ -467,12 +461,8 @@ func (h *ToolHandler) Execute(ctx context.Context, execCtx *Execution, node *mod
 		return runtime.Outcome{
 			Status:        runtime.StatusFail,
 			FailureReason: runErr.Error(),
-			Meta: map[string]any{
-				"failure_class": failureClassTransientInfra,
-			},
 			ContextUpdates: map[string]any{
-				"tool.output":   truncate(combinedStr, 8_000),
-				"failure_class": failureClassTransientInfra,
+				"tool.output": truncate(combinedStr, 8_000),
 			},
 		}, nil
 	}

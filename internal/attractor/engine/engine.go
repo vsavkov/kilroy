@@ -826,7 +826,15 @@ func (e *Engine) executeWithRetry(ctx context.Context, node *model.Node, retries
 		failureClass := classifyFailureClass(out)
 		canRetry := false
 		if attempt < maxAttempts {
-			canRetry = shouldRetryOutcome(out, failureClass)
+			// Tool command nodes (shape=parallelogram) always retry when
+			// max_retries is set — the user explicitly opted in. LLM/API
+			// nodes use failure classification to gate retries.
+			isToolNode := strings.TrimSpace(node.Attr("tool_command", "")) != ""
+			if isToolNode {
+				canRetry = out.Status == runtime.StatusFail || out.Status == runtime.StatusRetry
+			} else {
+				canRetry = shouldRetryOutcome(out, failureClass)
+			}
 		}
 		if canRetry {
 			retries[node.ID]++
