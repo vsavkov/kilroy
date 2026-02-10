@@ -1,11 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"time"
+	"strconv"
 
 	"github.com/strongdm/kilroy/internal/attractor/runstate"
 )
@@ -14,9 +13,19 @@ func attractorStatus(args []string) {
 	os.Exit(runAttractorStatus(args, os.Stdout, os.Stderr))
 }
 
+// loadSnapshot wraps runstate.LoadSnapshot for reuse.
+func loadSnapshot(logsRoot string) (*runstate.Snapshot, error) {
+	return runstate.LoadSnapshot(logsRoot)
+}
+
 func runAttractorStatus(args []string, stdout io.Writer, stderr io.Writer) int {
 	var logsRoot string
-	asJSON := false
+	var asJSON bool
+	var follow bool
+	var raw bool
+	var watch bool
+	var latest bool
+	intervalSec := 2
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -29,44 +38,66 @@ func runAttractorStatus(args []string, stdout io.Writer, stderr io.Writer) int {
 			logsRoot = args[i]
 		case "--json":
 			asJSON = true
+		case "--follow", "-f":
+			follow = true
+		case "--raw":
+			raw = true
+		case "--watch":
+			watch = true
+		case "--latest":
+			latest = true
+		case "--interval":
+			i++
+			if i >= len(args) {
+				fmt.Fprintln(stderr, "--interval requires a value")
+				return 1
+			}
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n <= 0 {
+				fmt.Fprintln(stderr, "--interval must be a positive integer")
+				return 1
+			}
+			intervalSec = n
 		default:
 			fmt.Fprintf(stderr, "unknown arg: %s\n", args[i])
 			return 1
 		}
 	}
 
-	if logsRoot == "" {
-		fmt.Fprintln(stderr, "--logs-root is required")
-		return 1
-	}
-
-	snapshot, err := runstate.LoadSnapshot(logsRoot)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-
-	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(snapshot); err != nil {
+	// Resolve --latest to logs-root.
+	if latest {
+		if logsRoot != "" {
+			fmt.Fprintln(stderr, "--latest and --logs-root are mutually exclusive")
+			return 1
+		}
+		root, err := latestRunLogsRoot()
+		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
-		return 0
+		logsRoot = root
+		fmt.Fprintf(stderr, "logs_root=%s\n", logsRoot)
 	}
 
-	fmt.Fprintf(stdout, "state=%s\n", snapshot.State)
-	fmt.Fprintf(stdout, "run_id=%s\n", snapshot.RunID)
-	fmt.Fprintf(stdout, "node=%s\n", snapshot.CurrentNodeID)
-	fmt.Fprintf(stdout, "event=%s\n", snapshot.LastEvent)
-	fmt.Fprintf(stdout, "pid=%d\n", snapshot.PID)
-	fmt.Fprintf(stdout, "pid_alive=%t\n", snapshot.PIDAlive)
-	if !snapshot.LastEventAt.IsZero() {
-		fmt.Fprintf(stdout, "last_event_at=%s\n", snapshot.LastEventAt.UTC().Format(time.RFC3339Nano))
+	if logsRoot == "" {
+		fmt.Fprintln(stderr, "--logs-root or --latest is required")
+		return 1
 	}
-	if snapshot.FailureReason != "" {
-		fmt.Fprintf(stdout, "failure_reason=%s\n", snapshot.FailureReason)
+
+	// Mutually exclusive modes.
+	if follow && watch {
+		fmt.Fprintln(stderr, "--follow and --watch are mutually exclusive")
+		return 1
 	}
-	return 0
+
+	if follow {
+		return runFollowProgress(logsRoot, stdout, raw)
+	}
+
+	if watch {
+		return runWatchStatus(logsRoot, stdout, stderr, asJSON, intervalSec)
+	}
+
+	// Default: one-shot snapshot.
+	return printSnapshot(logsRoot, stdout, stderr, asJSON)
 }
