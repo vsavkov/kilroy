@@ -9,7 +9,7 @@ func TestConfiguredAPIPromptProbeTransports_FromConfig(t *testing.T) {
 	cfg.Preflight.PromptProbes.Enabled = &enabled
 	cfg.Preflight.PromptProbes.Transports = []string{"complete", "stream"}
 
-	got, explicit, err := configuredAPIPromptProbeTransports(cfg, nil)
+	got, explicit, err := configuredAPIPromptProbeTransports(cfg)
 	if err != nil {
 		t.Fatalf("configuredAPIPromptProbeTransports: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestConfiguredAPIPromptProbeTransports_InvalidConfigValueErrors(t *testing.
 	applyConfigDefaults(cfg)
 	cfg.Preflight.PromptProbes.Transports = []string{"strem"}
 
-	if _, _, err := configuredAPIPromptProbeTransports(cfg, nil); err == nil {
+	if _, _, err := configuredAPIPromptProbeTransports(cfg); err == nil {
 		t.Fatal("expected invalid transport to fail")
 	}
 }

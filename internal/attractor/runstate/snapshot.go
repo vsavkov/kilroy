@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/strongdm/kilroy/internal/attractor/procutil"
 )
 
 type finalOutcomeDoc struct {
@@ -143,53 +143,7 @@ func applyPIDFile(s *Snapshot, tolerateParseErrors bool) error {
 }
 
 func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	if pidZombie(pid) {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	return errors.Is(err, syscall.EPERM)
-}
-
-func pidZombie(pid int) bool {
-	if !procFSAvailable() {
-		return pidZombieFromPS(pid)
-	}
-	statPath := filepath.Join("/proc", strconv.Itoa(pid), "stat")
-	b, err := os.ReadFile(statPath)
-	if err != nil {
-		return false
-	}
-	line := string(b)
-	closeIdx := strings.LastIndexByte(line, ')')
-	if closeIdx < 0 || closeIdx+2 >= len(line) {
-		return false
-	}
-	state := line[closeIdx+2]
-	return state == 'Z' || state == 'X'
-}
-
-func pidZombieFromPS(pid int) bool {
-	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return false
-	}
-	state := strings.TrimSpace(string(out))
-	if state == "" {
-		return false
-	}
-	c := state[0]
-	return c == 'Z' || c == 'X'
-}
-
-func procFSAvailable() bool {
-	_, err := os.Stat("/proc/self/stat")
-	return err == nil
+	return procutil.PIDAlive(pid)
 }
 
 func readLiveEvent(path string) (map[string]any, bool, error) {

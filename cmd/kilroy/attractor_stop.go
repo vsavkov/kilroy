@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/strongdm/kilroy/internal/attractor/procutil"
 	"github.com/strongdm/kilroy/internal/attractor/runstate"
 )
 
@@ -159,48 +160,7 @@ func adaptiveGracePoll(grace time.Duration) time.Duration {
 }
 
 func pidRunning(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	if pidZombie(pid) {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	return errors.Is(err, syscall.EPERM)
-}
-
-func pidZombie(pid int) bool {
-	if !procFSAvailable() {
-		return pidZombieFromPS(pid)
-	}
-	statPath := filepath.Join("/proc", strconv.Itoa(pid), "stat")
-	b, err := os.ReadFile(statPath)
-	if err != nil {
-		return false
-	}
-	line := string(b)
-	closeIdx := strings.LastIndexByte(line, ')')
-	if closeIdx < 0 || closeIdx+2 >= len(line) {
-		return false
-	}
-	state := line[closeIdx+2]
-	return state == 'Z' || state == 'X'
-}
-
-func pidZombieFromPS(pid int) bool {
-	out, err := exec.Command("ps", "-o", "state=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return false
-	}
-	state := strings.TrimSpace(string(out))
-	if state == "" {
-		return false
-	}
-	first := state[0]
-	return first == 'Z' || first == 'X'
+	return procutil.PIDAlive(pid)
 }
 
 func verifyAttractorRunPID(pid int, logsRoot string, runID string) (verifiedProcess, error) {
@@ -269,7 +229,7 @@ func resolveExpectedRunID(snapshotRunID string, logsRoot string) string {
 }
 
 func verifyPIDExecutableMatchesSelf(pid int) error {
-	if !procFSAvailable() {
+	if !procutil.ProcFSAvailable() {
 		return nil
 	}
 	selfExe, err := readProcessExePath("self")
@@ -311,15 +271,23 @@ func readManifestRunID(logsRoot string) (string, error) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return "", err
 	}
-	runID := strings.TrimSpace(fmt.Sprint(doc["run_id"]))
-	if runID == "" || runID == "<nil>" {
+	rawRunID, ok := doc["run_id"]
+	if !ok || rawRunID == nil {
+		return "", fmt.Errorf("manifest run_id is empty")
+	}
+	runID, ok := rawRunID.(string)
+	if !ok {
+		return "", fmt.Errorf("manifest run_id is not a string")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
 		return "", fmt.Errorf("manifest run_id is empty")
 	}
 	return runID, nil
 }
 
 func captureVerifiedProcess(pid int) (verifiedProcess, error) {
-	if !procFSAvailable() {
+	if !procutil.ProcFSAvailable() {
 		return verifiedProcess{PID: pid}, nil
 	}
 	start, err := readPIDStartTime(pid)
@@ -380,7 +348,7 @@ func readPIDStartTime(pid int) (uint64, error) {
 }
 
 func readPIDCmdline(pid int) ([]string, error) {
-	if !procFSAvailable() {
+	if !procutil.ProcFSAvailable() {
 		return readPIDCmdlineFromPS(pid)
 	}
 	path := filepath.Join("/proc", strconv.Itoa(pid), "cmdline")
@@ -448,9 +416,4 @@ func samePath(a, b string) bool {
 		return false
 	}
 	return filepath.Clean(absA) == filepath.Clean(absB)
-}
-
-func procFSAvailable() bool {
-	_, err := os.Stat("/proc/self/stat")
-	return err == nil
 }

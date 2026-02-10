@@ -161,7 +161,7 @@ func runProviderAPIPreflight(ctx context.Context, g *model.Graph, runtimes map[s
 	for _, provider := range client.ProviderNames() {
 		available[normalizeProviderKey(provider)] = true
 	}
-	transports, explicitTransports, err := configuredAPIPromptProbeTransports(cfg, g)
+	transports, explicitTransports, err := configuredAPIPromptProbeTransports(cfg)
 	if err != nil {
 		report.addCheck(providerPreflightCheck{
 			Name:    "provider_prompt_probe_transports",
@@ -252,8 +252,7 @@ type preflightAPIPromptProbePolicy struct {
 	MaxDelay  time.Duration
 }
 
-func configuredAPIPromptProbeTransports(cfg *RunConfigFile, g *model.Graph) ([]string, bool, error) {
-	_ = g
+func configuredAPIPromptProbeTransports(cfg *RunConfigFile) ([]string, bool, error) {
 	if cfg != nil && len(cfg.Preflight.PromptProbes.Transports) > 0 {
 		seen := map[string]bool{}
 		out := make([]string, 0, len(cfg.Preflight.PromptProbes.Transports))
