@@ -92,6 +92,7 @@ func writeTestFile(t *testing.T, path string, content string) error {
 	t.Helper()
 	return os.WriteFile(path, []byte(content), 0o644)
 }
+
 func TestCatalogHasProviderModel_AcceptsOpenRouterProviderPrefixes(t *testing.T) {
 	c := &Catalog{Models: map[string]ModelEntry{
 		"moonshotai/kimi-k2.5": {},
