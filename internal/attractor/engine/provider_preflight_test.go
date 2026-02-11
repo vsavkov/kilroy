@@ -904,7 +904,7 @@ func TestRunWithConfig_PreflightPromptProbe_CLIArgMode(t *testing.T) {
 set -euo pipefail
 if [[ "${1:-}" == "--help" ]]; then
 cat <<'EOF'
-Usage: claude -p --output-format stream-json --verbose --model MODEL
+Usage: claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model MODEL
 EOF
 exit 0
 fi
@@ -1198,7 +1198,7 @@ func TestRunWithConfig_PreflightPromptProbe_AllProvidersWhenGraphUsesAll(t *test
 	}))
 	defer apiSrv.Close()
 
-	claudeCLI := writeFakeCLI(t, "claude", "Usage: claude -p --output-format stream-json --verbose --model MODEL", 0)
+	claudeCLI := writeFakeCLI(t, "claude", "Usage: claude -p --output-format stream-json --verbose --dangerously-skip-permissions --model MODEL", 0)
 	geminiCLI := writeFakeCLI(t, "gemini", "Usage: gemini -p --output-format stream-json --yolo --model MODEL", 0)
 
 	t.Setenv("OPENAI_API_KEY", "k-openai")
