@@ -98,6 +98,51 @@ func TestClassifyProviderCLIErrorWithContract_CapabilityMissing(t *testing.T) {
 	}
 }
 
+func TestLooksLikeStreamDisconnect(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		want   bool
+	}{
+		{
+			name:   "empty",
+			stdout: "",
+			want:   false,
+		},
+		{
+			name:   "normal_codex_output",
+			stdout: `{"type":"item.completed","item":{"id":"item_1","type":"command_execution"}}`,
+			want:   false,
+		},
+		{
+			name:   "stream_disconnected",
+			stdout: `{"type":"error","message":"Reconnecting... 5/5 (stream disconnected before completion: stream closed before response.completed)"}`,
+			want:   true,
+		},
+		{
+			name:   "turn_failed_stream_closed",
+			stdout: `{"type":"turn.failed","error":{"message":"stream closed before response.completed"}}`,
+			want:   true,
+		},
+		{
+			name:   "stream_disconnected_among_normal_events",
+			stdout: `{"type":"item.completed","item":{"id":"item_1"}}
+{"type":"item.completed","item":{"id":"item_2"}}
+{"type":"error","message":"Reconnecting... 1/5 (stream disconnected before completion)"}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}`,
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := looksLikeStreamDisconnect(tc.stdout)
+			if got != tc.want {
+				t.Fatalf("looksLikeStreamDisconnect: got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClassifyAPIError(t *testing.T) {
 	cases := []struct {
 		name      string

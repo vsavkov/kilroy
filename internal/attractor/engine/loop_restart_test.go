@@ -525,6 +525,29 @@ digraph G {
 	}
 }
 
+func TestClassifyFailureClass_StreamDisconnectIsTransient(t *testing.T) {
+	cases := []struct {
+		reason    string
+		wantClass string
+	}{
+		{"codex stream disconnected before completion", failureClassTransientInfra},
+		{"stream closed before response.completed", failureClassTransientInfra},
+		{"exit status 1", failureClassDeterministic},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			out := runtime.Outcome{
+				Status:        runtime.StatusFail,
+				FailureReason: tc.reason,
+			}
+			got := classifyFailureClass(out)
+			if got != tc.wantClass {
+				t.Fatalf("classifyFailureClass(%q): got %q want %q", tc.reason, got, tc.wantClass)
+			}
+		})
+	}
+}
+
 func readProgressEvents(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	b, err := os.ReadFile(path)

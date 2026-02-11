@@ -161,6 +161,30 @@ func isGoogleModelNotFound(s string) bool {
 	return false
 }
 
+// looksLikeStreamDisconnect checks whether stdout from a codex CLI invocation
+// contains evidence of an API stream disconnect. Codex emits NDJSON events to
+// stdout; a stream disconnect produces lines like:
+//
+//	{"type":"error","message":"Reconnecting... 5/5 (stream disconnected before completion: ...)"}
+//	{"type":"turn.failed","error":{"message":"stream disconnected before completion: ..."}}
+//
+// These are transient infrastructure failures but codex exits with a generic
+// status code (1), which the stderr-only classifier cannot distinguish from
+// deterministic failures.
+func looksLikeStreamDisconnect(stdout string) bool {
+	if stdout == "" {
+		return false
+	}
+	lower := strings.ToLower(stdout)
+	if strings.Contains(lower, "stream disconnected") {
+		return true
+	}
+	if strings.Contains(lower, "stream closed before") {
+		return true
+	}
+	return false
+}
+
 func firstNonEmptyLine(s string) string {
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)

@@ -1069,6 +1069,24 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		outStr = string(outBytes)
 	}
 	if runErr != nil {
+		// Codex CLI reports stream disconnects as a generic "exit status 1", but
+		// the actual disconnect evidence appears in stdout's NDJSON event stream
+		// (e.g., {"type":"turn.failed","error":{"message":"stream disconnected..."}}).
+		// The stderr-only classifier misses this, so check stdout to reclassify
+		// as transient_infra — allowing loop_restart to retry instead of circuit-breaking.
+		if codexSemantics && looksLikeStreamDisconnect(outStr) {
+			return outStr, &runtime.Outcome{
+				Status:        runtime.StatusFail,
+				FailureReason: "codex stream disconnected before completion",
+				Meta: map[string]any{
+					"failure_class":     failureClassTransientInfra,
+					"failure_signature": fmt.Sprintf("provider_stream_disconnect|%s|stream_closed", providerKey),
+				},
+				ContextUpdates: map[string]any{
+					"failure_class": failureClassTransientInfra,
+				},
+			}, nil
+		}
 		return outStr, classifiedFailure(runErr, readStderr()), nil
 	}
 	return outStr, nil, nil

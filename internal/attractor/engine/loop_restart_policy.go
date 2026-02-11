@@ -40,6 +40,8 @@ var (
 		"econnreset",
 		"dial tcp",
 		"transport is closing",
+		"stream disconnected",
+		"stream closed before",
 		"502",
 		"503",
 		"504",
