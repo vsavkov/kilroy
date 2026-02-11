@@ -249,10 +249,10 @@ Observe and intervene during long runs:
 Provider runtime architecture:
 
 - Providers are protocol-driven and configured under `llm.providers.<provider>`.
-- Built-ins include `openai`, `anthropic`, `google`, `kimi`, and `zai`.
-- Provider aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`.
+- Built-ins include `openai`, `anthropic`, `google`, `kimi`, `zai`, and `cerebras`.
+- Provider aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`, `cerebras-ai` -> `cerebras`.
 - CLI contracts are built-in for `openai`, `anthropic`, and `google`.
-- `kimi` and `zai` are API-only in this release.
+- `kimi`, `zai`, and `cerebras` are API-only in this release.
 - `profile_family` selects agent behavior/tooling profile only; API requests still route by `llm_provider` (native provider key).
 
 CLI backend command mappings:
@@ -274,6 +274,7 @@ API backend environment variables:
 - Google: `GEMINI_API_KEY` or `GOOGLE_API_KEY` (`GEMINI_BASE_URL` optional)
 - Kimi (Coding API key): `KIMI_API_KEY`
 - ZAI: `ZAI_API_KEY`
+- Cerebras: `CEREBRAS_API_KEY`
 
 API prompt-probe tuning (preflight):
 
