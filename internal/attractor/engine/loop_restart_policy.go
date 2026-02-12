@@ -16,6 +16,7 @@ const (
 	failureClassBudgetExhausted      = "budget_exhausted"
 	failureClassCompilationLoop      = "compilation_loop"
 	defaultLoopRestartSignatureLimit = 3
+	defaultMaxNodeVisits             = 20
 )
 
 var (
@@ -146,6 +147,17 @@ func loopRestartSignatureLimit(g *model.Graph) int {
 	limit := parseInt(g.Attrs["loop_restart_signature_limit"], defaultLoopRestartSignatureLimit)
 	if limit < 1 {
 		return defaultLoopRestartSignatureLimit
+	}
+	return limit
+}
+
+func maxNodeVisits(g *model.Graph) int {
+	if g == nil {
+		return defaultMaxNodeVisits
+	}
+	limit := parseInt(g.Attrs["max_node_visits"], defaultMaxNodeVisits)
+	if limit < 1 {
+		return defaultMaxNodeVisits
 	}
 	return limit
 }

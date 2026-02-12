@@ -380,6 +380,8 @@ func (e *Engine) run(ctx context.Context) (res *Result, err error) {
 }
 
 func (e *Engine) runLoop(ctx context.Context, current string, completed []string, nodeRetries map[string]int, nodeOutcomes map[string]runtime.Outcome) (*Result, error) {
+	nodeVisits := map[string]int{}
+	visitLimit := maxNodeVisits(e.Graph)
 	for {
 		if err := runContextError(ctx); err != nil {
 			return nil, err
@@ -388,6 +390,28 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 		if node == nil {
 			return nil, fmt.Errorf("missing node: %s", current)
 		}
+
+		// Stuck-cycle detection: count how many times each node has been
+		// visited in this iteration. When a node exceeds max_node_visits
+		// (default 20), halt — the pipeline is stuck in a retry loop
+		// (e.g., implement succeeds but verify always fails due to
+		// environment issues). This catches cycles that the signature-based
+		// circuit breaker misses because the AI writes varying error messages.
+		nodeVisits[current]++
+		if nodeVisits[current] > visitLimit {
+			reason := fmt.Sprintf(
+				"run aborted: node %q visited %d times in this iteration (limit %d); pipeline is stuck in a cycle",
+				current, nodeVisits[current], visitLimit,
+			)
+			e.appendProgress(map[string]any{
+				"event":       "stuck_cycle_breaker",
+				"node_id":     current,
+				"visit_count": nodeVisits[current],
+				"visit_limit": visitLimit,
+			})
+			return nil, fmt.Errorf("%s", reason)
+		}
+
 		prev := ""
 		if len(completed) > 0 {
 			prev = completed[len(completed)-1]

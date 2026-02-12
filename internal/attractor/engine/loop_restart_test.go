@@ -548,6 +548,118 @@ func TestClassifyFailureClass_StreamDisconnectIsTransient(t *testing.T) {
 	}
 }
 
+
+func TestRun_StuckCycleNodeVisitLimit(t *testing.T) {
+	repo := t.TempDir()
+	runCmd(t, repo, "git", "init")
+	runCmd(t, repo, "git", "config", "user.name", "tester")
+	runCmd(t, repo, "git", "config", "user.email", "tester@example.com")
+	_ = os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644)
+	runCmd(t, repo, "git", "add", "-A")
+	runCmd(t, repo, "git", "commit", "-m", "init")
+
+	// Graph where implement always succeeds but verify always fails,
+	// and the retry edge goes back to implement WITHOUT loop_restart.
+	// This creates an unbounded cycle that the signature-based circuit
+	// breaker cannot catch (success resets signatures, and failure
+	// messages vary). The node visit limit must catch it.
+	dot := []byte(`
+digraph G {
+  graph [goal="test stuck cycle", max_node_visits="5"]
+  start  [shape=Mdiamond]
+  exit   [shape=Msquare]
+  impl   [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="implement"]
+  verify [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="verify"]
+  check  [shape=diamond]
+  start -> impl -> verify -> check
+  check -> exit [condition="outcome=success"]
+  check -> impl [condition="outcome=fail"]
+}
+`)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var callCount atomic.Int64
+	backend := &countingBackend{
+		fn: func(ctx context.Context, exec *Execution, node *model.Node, prompt string) (string, *runtime.Outcome, error) {
+			callCount.Add(1)
+			if node.ID == "impl" {
+				return "ok", &runtime.Outcome{Status: runtime.StatusSuccess}, nil
+			}
+			// verify always fails with varying messages (simulating AI variance)
+			n := callCount.Load()
+			return "fail", &runtime.Outcome{
+				Status:        runtime.StatusFail,
+				FailureReason: fmt.Sprintf("test failure variant %d: missing dependency xyz", n),
+			}, nil
+		},
+	}
+
+	g, _, err := Prepare(dot)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	logsRoot := t.TempDir()
+	eng := &Engine{
+		Graph:           g,
+		Options:         RunOptions{RepoPath: repo, RunID: "test-stuck-cycle", LogsRoot: logsRoot, WorktreeDir: filepath.Join(logsRoot, "worktree"), RunBranchPrefix: "attractor/run", RequireClean: true},
+		DotSource:       dot,
+		LogsRoot:        logsRoot,
+		WorktreeDir:     filepath.Join(logsRoot, "worktree"),
+		Context:         runtime.NewContext(),
+		Registry:        NewDefaultRegistry(),
+		Interviewer:     &AutoApproveInterviewer{},
+		CodergenBackend: backend,
+	}
+	eng.RunBranch = "attractor/run/test-stuck-cycle"
+
+	_, err = eng.run(ctx)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "stuck in a cycle") {
+		t.Fatalf("expected stuck cycle error, got: %v", err)
+	}
+	// impl should have been visited at most max_node_visits+1 times (the check fires on entry)
+	if callCount.Load() > 20 {
+		t.Fatalf("expected backend called <= 20 times, got %d", callCount.Load())
+	}
+
+	// Verify final.json was written with failure
+	finalBytes, err := os.ReadFile(filepath.Join(logsRoot, "final.json"))
+	if err != nil {
+		t.Fatalf("read final.json: %v", err)
+	}
+	var final runtime.FinalOutcome
+	if err := json.Unmarshal(finalBytes, &final); err != nil {
+		t.Fatalf("unmarshal final.json: %v", err)
+	}
+	if final.Status != runtime.FinalFail {
+		t.Fatalf("final status = %q, want %q", final.Status, runtime.FinalFail)
+	}
+	if !strings.Contains(final.FailureReason, "stuck in a cycle") {
+		t.Fatalf("final failure_reason = %q, want stuck cycle", final.FailureReason)
+	}
+}
+
+func TestMaxNodeVisits_GraphAttrOverride(t *testing.T) {
+	g := &model.Graph{Attrs: map[string]string{"max_node_visits": "7"}}
+	if got := maxNodeVisits(g); got != 7 {
+		t.Fatalf("maxNodeVisits with attr=7: got %d want 7", got)
+	}
+}
+
+func TestMaxNodeVisits_DefaultWhenMissing(t *testing.T) {
+	g := &model.Graph{Attrs: map[string]string{}}
+	if got := maxNodeVisits(g); got != defaultMaxNodeVisits {
+		t.Fatalf("maxNodeVisits default: got %d want %d", got, defaultMaxNodeVisits)
+	}
+	if got := maxNodeVisits(nil); got != defaultMaxNodeVisits {
+		t.Fatalf("maxNodeVisits nil: got %d want %d", got, defaultMaxNodeVisits)
+	}
+}
+
 func readProgressEvents(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	b, err := os.ReadFile(path)
