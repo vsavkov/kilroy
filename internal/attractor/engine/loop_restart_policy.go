@@ -13,6 +13,8 @@ const (
 	failureClassTransientInfra       = "transient_infra"
 	failureClassDeterministic        = "deterministic"
 	failureClassCanceled             = "canceled"
+	failureClassBudgetExhausted      = "budget_exhausted"
+	failureClassCompilationLoop      = "compilation_loop"
 	defaultLoopRestartSignatureLimit = 3
 )
 
@@ -20,7 +22,7 @@ var (
 	failureSignatureWhitespaceRE = regexp.MustCompile(`\s+`)
 	failureSignatureHexRE        = regexp.MustCompile(`\b[0-9a-f]{7,64}\b`)
 	failureSignatureDigitsRE     = regexp.MustCompile(`\b\d+\b`)
-	transientInfraReasonHints    = []string{
+	transientInfraReasonHints = []string{
 		"timeout",
 		"timed out",
 		"context deadline exceeded",
@@ -47,6 +49,17 @@ var (
 		"503",
 		"504",
 	}
+	budgetExhaustedReasonHints = []string{
+		"turn limit",
+		"max_turns",
+		"max turns",
+		"token limit",
+		"max tokens",
+		"max_tokens",
+		"context length exceeded",
+		"context window exceeded",
+		"budget exhausted",
+	}
 )
 
 func isFailureLoopRestartOutcome(out runtime.Outcome) bool {
@@ -71,6 +84,11 @@ func classifyFailureClass(out runtime.Outcome) string {
 	for _, hint := range transientInfraReasonHints {
 		if strings.Contains(reason, hint) {
 			return failureClassTransientInfra
+		}
+	}
+	for _, hint := range budgetExhaustedReasonHints {
+		if strings.Contains(reason, hint) {
+			return failureClassBudgetExhausted
 		}
 	}
 	return failureClassDeterministic
@@ -104,6 +122,10 @@ func normalizedFailureClass(raw string) string {
 		return failureClassCanceled
 	case "deterministic", "non_transient", "non-transient", "permanent", "logic", "product":
 		return failureClassDeterministic
+	case "budget_exhausted", "budget-exhausted", "budget exhausted", "budget":
+		return failureClassBudgetExhausted
+	case "compilation_loop", "compilation-loop", "compilation loop", "compile_loop", "compile-loop":
+		return failureClassCompilationLoop
 	default:
 		return failureClassDeterministic
 	}
