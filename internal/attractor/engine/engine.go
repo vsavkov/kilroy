@@ -951,6 +951,19 @@ func (e *Engine) executeWithRetry(ctx context.Context, node *model.Node, retries
 	}
 	maxAttempts := maxRetries + 1
 
+	// --- Escalation setup ---
+	escalationChain := parseEscalationModels(node.Attr("escalation_models", ""))
+	rbe := retriesBeforeEscalation(e.Graph)
+	origModel := node.Attrs["llm_model"]
+	origProvider := node.Attrs["llm_provider"]
+	defer func() {
+		// Always restore original attrs, even on early return.
+		node.Attrs["llm_model"] = origModel
+		node.Attrs["llm_provider"] = origProvider
+	}()
+	escalationFailCount := 0 // consecutive escalatable failures on the current model
+	escalationIdx := -1      // -1 = using default model; 0+ = index into escalationChain
+
 	allowPartial := strings.EqualFold(node.Attr("allow_partial", "false"), "true")
 	stageDir := filepath.Join(e.LogsRoot, node.ID)
 
@@ -990,8 +1003,33 @@ func (e *Engine) executeWithRetry(ctx context.Context, node *model.Node, retries
 			isToolNode := strings.TrimSpace(node.Attr("tool_command", "")) != ""
 			if isToolNode {
 				canRetry = out.Status == runtime.StatusFail || out.Status == runtime.StatusRetry
-			} else {
-				canRetry = shouldRetryOutcome(out, failureClass)
+			} else if shouldRetryOutcome(out, failureClass) {
+				canRetry = true
+				// Check if escalation applies (capability failures, not transient)
+				if isEscalatableFailureClass(failureClass) && len(escalationChain) > 0 {
+					escalationFailCount++
+					if escalationFailCount > rbe && escalationIdx < len(escalationChain)-1 {
+						prevProvider := node.Attrs["llm_provider"]
+						prevModel := node.Attrs["llm_model"]
+						escalationIdx++
+						next := escalationChain[escalationIdx]
+						node.Attrs["llm_model"] = next.Model
+						node.Attrs["llm_provider"] = next.Provider
+						escalationFailCount = 0
+						e.appendProgress(map[string]any{
+							"event":          "escalation_model_switch",
+							"node_id":        node.ID,
+							"attempt":        attempt,
+							"from_provider":  prevProvider,
+							"from_model":     prevModel,
+							"to_provider":    next.Provider,
+							"to_model":       next.Model,
+							"escalation_idx": escalationIdx,
+							"failure_class":  failureClass,
+						})
+					}
+				}
+				// For transient_infra: no model change, just retry same model.
 			}
 		}
 		if canRetry {

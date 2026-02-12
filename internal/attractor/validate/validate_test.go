@@ -181,6 +181,58 @@ digraph G {
 	}
 }
 
+func TestValidate_EscalationModelsSyntax_Valid_NoWarning(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  a [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="x", escalation_models="kimi:kimi-k2.5, anthropic:claude-opus-4-6"]
+  start -> a -> exit
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	for _, d := range diags {
+		if d.Rule == "escalation_models_syntax" {
+			t.Fatalf("unexpected escalation_models_syntax warning for valid entries: %+v", d)
+		}
+	}
+}
+
+func TestValidate_EscalationModelsSyntax_MissingColon(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  a [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="x", escalation_models="kimi-kimi-k2.5"]
+  start -> a -> exit
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertHasRule(t, diags, "escalation_models_syntax", SeverityWarning)
+}
+
+func TestValidate_EscalationModelsSyntax_EmptyProvider(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  start [shape=Mdiamond]
+  exit  [shape=Msquare]
+  a [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="x", escalation_models=":some-model"]
+  start -> a -> exit
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertHasRule(t, diags, "escalation_models_syntax", SeverityWarning)
+}
+
 func assertHasRule(t *testing.T, diags []Diagnostic, rule string, sev Severity) {
 	t.Helper()
 	for _, d := range diags {

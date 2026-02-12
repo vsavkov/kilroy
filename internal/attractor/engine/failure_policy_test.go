@@ -49,6 +49,24 @@ func TestShouldRetryOutcome_ClassGated(t *testing.T) {
 			class: "",
 			want:  false,
 		},
+		{
+			name:  "fail budget_exhausted retries",
+			out:   runtime.Outcome{Status: runtime.StatusFail, FailureReason: "turn limit reached"},
+			class: failureClassBudgetExhausted,
+			want:  true,
+		},
+		{
+			name:  "fail compilation_loop retries",
+			out:   runtime.Outcome{Status: runtime.StatusFail, FailureReason: "same 3 errors after 20 turns"},
+			class: failureClassCompilationLoop,
+			want:  true,
+		},
+		{
+			name:  "retry budget_exhausted retries",
+			out:   runtime.Outcome{Status: runtime.StatusRetry, FailureReason: "budget spent"},
+			class: failureClassBudgetExhausted,
+			want:  true,
+		},
 	}
 
 	for _, tc := range cases {

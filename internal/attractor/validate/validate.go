@@ -48,6 +48,7 @@ func Validate(g *model.Graph) []Diagnostic {
 	diags = append(diags, lintPromptOnCodergenNodes(g)...)
 	diags = append(diags, lintLLMProviderPresent(g)...)
 	diags = append(diags, lintLoopRestartFailureClassGuard(g)...)
+	diags = append(diags, lintEscalationModelsSyntax(g)...)
 	return diags
 }
 
@@ -563,4 +564,53 @@ func conditionHasTransientInfraGuard(condExpr string) bool {
 		}
 	}
 	return false
+}
+
+func lintEscalationModelsSyntax(g *model.Graph) []Diagnostic {
+	var diags []Diagnostic
+	for id, n := range g.Nodes {
+		if n == nil {
+			continue
+		}
+		raw := strings.TrimSpace(n.Attr("escalation_models", ""))
+		if raw == "" {
+			continue
+		}
+		for _, entry := range strings.Split(raw, ",") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			idx := strings.Index(entry, ":")
+			if idx < 0 {
+				diags = append(diags, Diagnostic{
+					Rule:     "escalation_models_syntax",
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("escalation_models entry %q missing colon separator (expected provider:model)", entry),
+					NodeID:   id,
+					Fix:      "use provider:model format, e.g. \"anthropic:claude-opus-4-6\"",
+				})
+				continue
+			}
+			prov := strings.TrimSpace(entry[:idx])
+			mod := strings.TrimSpace(entry[idx+1:])
+			if prov == "" {
+				diags = append(diags, Diagnostic{
+					Rule:     "escalation_models_syntax",
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("escalation_models entry %q has empty provider", entry),
+					NodeID:   id,
+				})
+			}
+			if mod == "" {
+				diags = append(diags, Diagnostic{
+					Rule:     "escalation_models_syntax",
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("escalation_models entry %q has empty model", entry),
+					NodeID:   id,
+				})
+			}
+		}
+	}
+	return diags
 }
