@@ -1002,11 +1002,30 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 			return nil, -1, 0, err
 		}
 		defer func() { _ = stderrFile.Close() }()
-		cmd.Stdout = stdoutFile
+		// Tee stdout through a parser goroutine to decompose CLI conversation
+		// turns into individual CXDB events in real time.
+		var streamPW *io.PipeWriter
+		var streamDone chan struct{}
+		if !codexSemantics && execCtx != nil && execCtx.Engine != nil && execCtx.Engine.CXDB != nil {
+			pr, pw := io.Pipe()
+			streamPW = pw
+			streamDone = make(chan struct{})
+			go func() {
+				defer close(streamDone)
+				parseCLIOutputStream(ctx, execCtx.Engine, node.ID, pr)
+			}()
+			cmd.Stdout = io.MultiWriter(stdoutFile, pw)
+		} else {
+			cmd.Stdout = stdoutFile
+		}
 		cmd.Stderr = stderrFile
 
 		start := time.Now()
 		if err := cmd.Start(); err != nil {
+			if streamPW != nil {
+				_ = streamPW.Close()
+				<-streamDone
+			}
 			return nil, -1, 0, err
 		}
 
@@ -1054,6 +1073,10 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		runErr, idleTimedOut, err = waitWithIdleWatchdog(runCtx, cmd, stdoutPath, stderrPath, idleTimeout, killGrace)
 		close(heartbeatStop)
 		<-heartbeatDone
+		if streamPW != nil {
+			_ = streamPW.Close()
+			<-streamDone
+		}
 		if err != nil {
 			return nil, -1, time.Since(start), err
 		}
