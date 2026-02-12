@@ -248,6 +248,33 @@ func TestEmitCXDBCLIStreamEvent_NilSafety(t *testing.T) {
 	}
 }
 
+func TestTruncate_RuneSafe(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		max      int
+		expected string
+	}{
+		{"ASCII under limit", "hello", 10, "hello"},
+		{"ASCII at limit", "hello", 5, "hello"},
+		{"ASCII over limit", "hello world", 5, "hello"},
+		{"CJK under limit", "你好", 5, "你好"},
+		{"CJK over limit", "你好世界啊六七八", 5, "你好世界啊"},
+		{"emoji at limit", "😀🎉🚀", 3, "😀🎉🚀"},
+		{"emoji over limit", "😀🎉🚀🌍", 3, "😀🎉🚀"},
+		{"empty string", "", 5, ""},
+		{"zero max", "hello", 0, "hello"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.input, tt.max)
+			if got != tt.expected {
+				t.Fatalf("truncate(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.expected)
+			}
+		})
+	}
+}
+
 // newTestEngineWithCXDB creates a minimal Engine with a CXDB sink for testing.
 func newTestEngineWithCXDB(t *testing.T, srv *cxdbTestServer) *Engine {
 	t.Helper()

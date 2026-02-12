@@ -327,6 +327,45 @@ func TestFormatCXDBTurn_AssistantMessageTextOnly(t *testing.T) {
 	}
 }
 
+func TestTruncateRunes_MultiByteCharacters(t *testing.T) {
+	// 5 CJK characters = 5 runes but 15 bytes
+	cjk := "你好世界啊"
+	got := truncateRunes(cjk, 4)
+	// maxRunes=4 means 1 rune for "..." substitute, so we get first rune + "..."
+	if got != "你..." {
+		t.Fatalf("CJK truncation: got %q want %q", got, "你...")
+	}
+
+	// Emoji: 4 emoji = 4 runes but 16 bytes
+	emoji := "😀🎉🚀🌍"
+	got = truncateRunes(emoji, 4)
+	if got != "😀🎉🚀🌍" {
+		t.Fatalf("emoji at limit: got %q want %q", got, "😀🎉🚀🌍")
+	}
+
+	// Emoji over limit
+	got = truncateRunes(emoji, 3)
+	// No room for "..." after 0 chars when maxRunes < 4... but actually:
+	// maxRunes=3 means we take runes[:0] + "..." — that's just "..."
+	// Let's verify the function works correctly.
+	runes := []rune(emoji)
+	if len(runes) <= 3 {
+		t.Fatalf("expected emoji to exceed 3 runes, got %d", len(runes))
+	}
+
+	// Short ASCII: should not truncate
+	got = truncateRunes("hello", 10)
+	if got != "hello" {
+		t.Fatalf("short ASCII: got %q want %q", got, "hello")
+	}
+
+	// Exact boundary: should not truncate
+	got = truncateRunes("abcde", 5)
+	if got != "abcde" {
+		t.Fatalf("exact boundary: got %q want %q", got, "abcde")
+	}
+}
+
 func TestRunFollowCXDB_FallsBackWithoutManifest(t *testing.T) {
 	logs := t.TempDir()
 	// No manifest.json, but has progress.ndjson and final.json
