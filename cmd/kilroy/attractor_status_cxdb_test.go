@@ -268,6 +268,65 @@ func TestFormatCXDBTurn_RunCompleted(t *testing.T) {
 	}
 }
 
+func TestFormatCXDBTurn_AssistantMessage(t *testing.T) {
+	turn := cxdb.Turn{
+		TypeID:      "com.kilroy.attractor.AssistantMessage",
+		TypeVersion: 1,
+		Depth:       8,
+		Payload: map[string]any{
+			"timestamp_ms":  float64(1739163625000),
+			"model":         "claude-sonnet-4-5-20250929",
+			"input_tokens":  float64(1500),
+			"output_tokens": float64(42),
+			"tool_use_count": float64(2),
+			"text":          "Let me read the file and check the tests.",
+		},
+	}
+	got := formatCXDBTurn(turn)
+	if !strings.Contains(got, "ASSISTANT_MSG") {
+		t.Fatalf("expected ASSISTANT_MSG: %s", got)
+	}
+	if !strings.Contains(got, "claude-sonnet-4-5-20250929") {
+		t.Fatalf("expected model: %s", got)
+	}
+	if !strings.Contains(got, "in=1500") {
+		t.Fatalf("expected input tokens: %s", got)
+	}
+	if !strings.Contains(got, "out=42") {
+		t.Fatalf("expected output tokens: %s", got)
+	}
+	if !strings.Contains(got, "2 tools") {
+		t.Fatalf("expected tool count: %s", got)
+	}
+	if !strings.Contains(got, "Let me read") {
+		t.Fatalf("expected text preview: %s", got)
+	}
+}
+
+func TestFormatCXDBTurn_AssistantMessageTextOnly(t *testing.T) {
+	turn := cxdb.Turn{
+		TypeID:      "com.kilroy.attractor.AssistantMessage",
+		TypeVersion: 1,
+		Depth:       9,
+		Payload: map[string]any{
+			"timestamp_ms":  float64(1739163625000),
+			"model":         "claude-sonnet-4-5-20250929",
+			"input_tokens":  float64(500),
+			"output_tokens": float64(10),
+			"tool_use_count": float64(0),
+			"text":          "Done.",
+		},
+	}
+	got := formatCXDBTurn(turn)
+	if !strings.Contains(got, "ASSISTANT_MSG") {
+		t.Fatalf("expected ASSISTANT_MSG: %s", got)
+	}
+	// No "(0 tools)" when count is 0
+	if strings.Contains(got, "tools") {
+		t.Fatalf("expected no tools mention for 0 tools: %s", got)
+	}
+}
+
 func TestRunFollowCXDB_FallsBackWithoutManifest(t *testing.T) {
 	logs := t.TempDir()
 	// No manifest.json, but has progress.ndjson and final.json

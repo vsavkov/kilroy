@@ -218,6 +218,24 @@ func formatCXDBTurn(turn cxdb.Turn) string {
 		}
 		return fmt.Sprintf("%s | RUN_COMPLETED          | %s (commit %s)", ts, status, sha)
 
+	case "com.kilroy.attractor.AssistantMessage":
+		model := payloadStr(p, "model")
+		inTok := payloadStr(p, "input_tokens")
+		outTok := payloadStr(p, "output_tokens")
+		toolCount := payloadStr(p, "tool_use_count")
+		text := payloadStr(p, "text")
+		if len(text) > 120 {
+			text = text[:117] + "..."
+		}
+		line := fmt.Sprintf("%s | ASSISTANT_MSG          | %s [in=%s out=%s]", ts, model, inTok, outTok)
+		if toolCount != "" && toolCount != "0" {
+			line += fmt.Sprintf(" (%s tools)", toolCount)
+		}
+		if text != "" {
+			line += "\n" + strings.Repeat(" ", 11) + text
+		}
+		return line
+
 	case "com.kilroy.attractor.RunFailed":
 		reason := payloadStr(p, "reason")
 		return fmt.Sprintf("%s | RUN_FAILED             | %s | %s", ts, nodeID, reason)

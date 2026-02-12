@@ -3,8 +3,11 @@
 package engine
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 )
 
 // cliStreamEvent represents a single NDJSON line from Claude CLI --output-format stream-json.
@@ -153,6 +156,28 @@ func extractToolCalls(msg *cliMessage) []cliToolCall {
 		})
 	}
 	return calls
+}
+
+// parseCLIOutputStream reads NDJSON lines from r and emits CXDB turns for each
+// assistant/user message. Designed to run as a goroutine; returns when r is closed.
+func parseCLIOutputStream(ctx context.Context, eng *Engine, nodeID string, r io.Reader) {
+	callMap := map[string]string{}
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 256*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		ev, err := parseCLIStreamLine(line)
+		if err != nil {
+			continue
+		}
+		if ev == nil {
+			continue
+		}
+		emitCXDBCLIStreamEvent(ctx, eng, nodeID, ev, callMap)
+	}
 }
 
 // extractToolResults returns all tool_result blocks from a user message.
