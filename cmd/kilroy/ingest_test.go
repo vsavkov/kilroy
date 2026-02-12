@@ -61,6 +61,30 @@ func TestParseIngestArgs(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "max-turns flag",
+			args: []string{"--max-turns", "10", "Build a solitaire game"},
+			check: func(t *testing.T, o *ingestOptions) {
+				if o.maxTurns != 10 {
+					t.Errorf("maxTurns = %d, want 10", o.maxTurns)
+				}
+			},
+		},
+		{
+			name:    "max-turns missing value",
+			args:    []string{"--max-turns"},
+			wantErr: true,
+		},
+		{
+			name:    "max-turns non-integer",
+			args:    []string{"--max-turns", "abc", "Build a solitaire game"},
+			wantErr: true,
+		},
+		{
+			name:    "max-turns zero",
+			args:    []string{"--max-turns", "0", "Build a solitaire game"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -20,13 +20,11 @@ Multiple positional words are joined with spaces.
 
 ### 1.2 Skill File
 
-A markdown file (default: `skills/english-to-dotfile/SKILL.md`) containing instructions that teach the LLM how to produce valid `.dot` pipeline files. The skill is appended to Claude Code's system prompt via `--append-system-prompt-file`, preserving Claude Code's built-in tool instructions.
-
-The skill file must include an **Output Format** section instructing the model to emit raw `.dot` content without markdown fences or commentary when invoked programmatically.
+A markdown file (default: `skills/english-to-dotfile/SKILL.md`) containing instructions that teach the LLM how to produce valid `.dot` pipeline files. The skill is appended to Claude Code's system prompt via `--append-system-prompt`, preserving Claude Code's built-in tool instructions.
 
 ### 1.3 Repository Context
 
-The ingestor runs Claude Code with its working directory set to the repository root (default: current directory). This gives the LLM access to spec files, existing code, and project structure referenced in the requirements.
+The ingestor gives Claude Code read access to the repository root (default: current directory) via `--add-dir`. This gives the LLM access to spec files, existing code, and project structure referenced in the requirements. Relative paths are resolved to absolute before passing to Claude.
 
 ---
 
@@ -53,20 +51,20 @@ By default, the output is validated through `engine.Prepare()` before delivery. 
 Requirements text (English)
     |
     v
-Claude Code CLI invocation
-    claude -p \
-      --append-system-prompt-file <skill.md> \
-      --output-format text \
+Claude Code CLI invocation (interactive)
+    claude \
       --model <model> \
-      --max-turns 3 \
+      --max-turns <n> \
       --dangerously-skip-permissions \
-      "<requirements>"
+      --append-system-prompt <skill content> \
+      --add-dir <repo path> \
+      "<ingest prompt with requirements>"
     |
     v
-Raw text output (may include commentary)
+Claude writes pipeline.dot to its working directory (a temp dir)
     |
     v
-ExtractDigraph() — brace-counting extraction
+Kilroy reads pipeline.dot after Claude exits
     |
     v
 engine.Prepare() — structural validation
@@ -77,38 +75,25 @@ engine.Prepare() — structural validation
 
 ### 3.1 Claude Code Invocation
 
-The ingestor spawns Claude Code as a subprocess in print mode (`-p`). Key flags:
+The ingestor spawns Claude Code as an interactive subprocess. Claude runs in a temporary working directory and writes `pipeline.dot` there. Key flags:
 
 | Flag | Value | Purpose |
 |------|-------|---------|
-| `-p` | — | Non-interactive print mode |
-| `--output-format` | `text` | Raw text output (no JSON wrapping) |
 | `--model` | Configurable (default: `claude-sonnet-4-5`) | LLM model for generation |
-| `--max-turns` | `3` (default) | Ingestion is generation, not agentic coding |
-| `--dangerously-skip-permissions` | — | No TTY available for permission prompts |
-| `--append-system-prompt-file` | Path to skill file | Loads skill as system prompt addition |
+| `--max-turns` | `15` (default) | Max agentic turns |
+| `--dangerously-skip-permissions` | — | Skip interactive permission prompts |
+| `--append-system-prompt` | Skill file content | Loads skill as system prompt addition |
+| `--add-dir` | Repository root (absolute) | Gives Claude read access to the repo |
 
-The requirements text is passed as the final positional argument (the prompt).
+The ingest prompt (from `ingest_prompt.tmpl`) is passed as the final positional argument. It instructs Claude to follow the skill exactly and write the `.dot` file to `pipeline.dot`.
 
 The executable defaults to `claude` but can be overridden via the `KILROY_CLAUDE_PATH` environment variable.
 
-Stdin is set to empty to prevent interactive prompts. The invocation has a 5-minute context timeout.
+Stdin, stdout, and stderr are connected to the terminal for interactive use. The invocation has a 15-minute context timeout.
 
-### 3.2 Digraph Extraction
+### 3.2 Output Collection
 
-The LLM output may contain the `.dot` digraph surrounded by leading text, trailing commentary, or markdown code fences. The `ExtractDigraph` function reliably extracts the digraph block:
-
-1. Find the first occurrence of the `digraph` keyword
-2. Find the opening `{`
-3. Count braces to locate the matching `}`, respecting double-quoted strings (prompts in `.dot` files contain code snippets with braces)
-4. Return the substring from `digraph` through the matching `}`
-
-The extractor handles:
-- Clean digraph-only output
-- Leading commentary before `digraph`
-- Trailing commentary after closing `}`
-- Markdown code fences (` ```dot ... ``` `)
-- Nested braces inside quoted prompt attributes
+After Claude exits, the ingestor reads `pipeline.dot` from the temporary working directory. The content is trimmed and validated. The temp directory is cleaned up via `defer os.RemoveAll`.
 
 ### 3.3 Validation
 
@@ -134,8 +119,9 @@ Go. Part of the `kilroy` binary.
 | Package | Files | Purpose |
 |---------|-------|---------|
 | `cmd/kilroy` | `ingest.go` | CLI arg parsing, `attractorIngest()` entry point, `runIngest()` orchestrator |
-| `internal/attractor/ingest` | `extract.go` | `ExtractDigraph()` — digraph extraction from LLM output |
+| `internal/attractor/ingest` | `extract.go` | `ExtractDigraph()` — digraph extraction (standalone utility) |
 | `internal/attractor/ingest` | `ingest.go` | `Options`, `Result`, `buildCLIArgs()`, `Run()` — core invocation logic |
+| `internal/attractor/ingest` | `ingest_prompt.tmpl` | Embedded prompt template for Claude |
 
 ### 4.3 Data Types
 
@@ -148,6 +134,7 @@ type ingestOptions struct {
     skillPath    string
     repoPath     string
     validate     bool
+    maxTurns     int
 }
 
 // Package-level options (internal/attractor/ingest)
@@ -163,7 +150,6 @@ type Options struct {
 // Ingestion result
 type Result struct {
     DotContent string
-    RawOutput  string
     Warnings   []string
 }
 ```
@@ -190,6 +176,7 @@ Flags:
     --model <model>         LLM model ID (default: claude-sonnet-4-5)
     --skill <path>          Path to skill .md file (default: auto-detect)
     --repo <path>           Repository root (default: current directory)
+    --max-turns <n>         Max agentic turns for Claude (default: 15)
     --no-validate           Skip .dot validation
 ```
 
@@ -222,12 +209,12 @@ kilroy attractor ingest --skill /path/to/custom-skill.md "Build a chat app"
 | Missing requirements text | Exit 1, print usage |
 | Unknown flag | Exit 1, print error and usage |
 | Skill file not found | Exit 1, print path and error |
-| Claude Code invocation fails | Exit 1, print exit code, truncated stdout (500 chars), truncated stderr (500 chars) |
-| No `digraph` in output | Exit 1, print error and first 1000 chars of raw output |
-| Unmatched braces in digraph | Exit 1, print error |
+| Claude Code invocation fails | Exit 1, print error |
+| Claude did not write `pipeline.dot` | Exit 1, print error |
+| `pipeline.dot` is empty | Exit 1, print error |
 | Validation fails | Exit 1, print validation error. Result struct still contains `DotContent` for programmatic callers |
 | Validation warnings | Print warnings to stderr, continue normally |
-| Context timeout (5 min) | Exit 1, Claude Code process killed |
+| Context timeout (15 min) | Exit 1, Claude Code process killed |
 
 ---
 
@@ -270,9 +257,7 @@ The validation step ensures the generated `.dot` file is accepted by `engine.Pre
 
 ## 10. Not in v1
 
-- Interactive mode (conversational refinement of the pipeline)
-- Retry on extraction failure (re-invoke Claude Code with feedback)
+- Retry on generation failure (re-invoke Claude Code with feedback)
 - Pipeline diffing (compare two generated `.dot` files)
-- Streaming output (progressive display of `.dot` generation)
 - Multi-skill composition (combining multiple skill files)
 - Cost estimation or token counting

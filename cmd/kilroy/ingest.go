@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ type ingestOptions struct {
 	skillPath    string
 	repoPath     string
 	validate     bool
+	maxTurns     int
 }
 
 func parseIngestArgs(args []string) (*ingestOptions, error) {
@@ -53,6 +55,16 @@ func parseIngestArgs(args []string) (*ingestOptions, error) {
 				return nil, fmt.Errorf("--repo requires a value")
 			}
 			opts.repoPath = args[i]
+		case "--max-turns":
+			i++
+			if i >= len(args) {
+				return nil, fmt.Errorf("--max-turns requires a value")
+			}
+			n, err := strconv.Atoi(args[i])
+			if err != nil || n < 1 {
+				return nil, fmt.Errorf("--max-turns must be a positive integer")
+			}
+			opts.maxTurns = n
 		case "--no-validate":
 			opts.validate = false
 		default:
@@ -96,6 +108,7 @@ func attractorIngest(args []string) {
 		fmt.Fprintln(os.Stderr, "  --model         LLM model (default: claude-sonnet-4-5)")
 		fmt.Fprintln(os.Stderr, "  --skill         Path to skill .md file (default: auto-detect)")
 		fmt.Fprintln(os.Stderr, "  --repo          Repository root (default: cwd)")
+		fmt.Fprintln(os.Stderr, "  --max-turns     Max agentic turns for Claude (default: 15)")
 		fmt.Fprintln(os.Stderr, "  --no-validate   Skip .dot validation")
 		os.Exit(1)
 	}
@@ -118,7 +131,7 @@ func attractorIngest(args []string) {
 }
 
 func runIngest(opts *ingestOptions) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	result, err := ingest.Run(ctx, ingest.Options{
@@ -127,6 +140,7 @@ func runIngest(opts *ingestOptions) (string, error) {
 		Model:        opts.model,
 		RepoPath:     opts.repoPath,
 		Validate:     opts.validate,
+		MaxTurns:     opts.maxTurns,
 	})
 	if err != nil {
 		return "", err
