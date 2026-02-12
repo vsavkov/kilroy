@@ -657,6 +657,10 @@ Read: [DEPENDENCY_FILES] for types/interfaces you need.
 Create/modify:
 - [FILE_LIST]
 
+Build-first strategy:
+- FIRST MILESTONE: Achieve a clean `[BUILD_COMMAND]` with stub/skeleton implementations before filling in logic.
+- If you spend more than a third of your turns on build errors without reaching a clean compile, simplify your approach: comment out broken code, add stubs, get to green, then iterate.
+
 Acceptance:
 - `[BUILD_COMMAND]` must pass
 - `[TEST_COMMAND]` must pass
@@ -719,12 +723,45 @@ Simple impl/verify prompts (5-10 lines) are fine for straightforward tasks. But 
 
 The reference dotfiles in `docs/strongdm/dot specs/` demonstrate production-quality prompts with multi-paragraph instructions, embedded shell commands with examples, numbered steps, and conditional branches within a single prompt.
 
+For high-turn-budget nodes (40+ turns) that produce compiled code, use the **progressive compilation pattern** to prevent late-stage build failures:
+
+```
+Implementation approach:
+1. Create all files with stub/skeleton implementations (verify: [BUILD_COMMAND] must pass)
+2. Implement module A logic (verify: [BUILD_COMMAND] must pass)
+3. Implement module B logic (verify: [BUILD_COMMAND] must pass)
+4. Write tests (verify: [TEST_COMMAND] must pass)
+
+Do NOT proceed to the next module until the current one compiles.
+```
+
+This catches type errors and interface mismatches incrementally rather than discovering them after 50 turns of work. It naturally pairs with the build-first strategy in the implementation prompt template.
+
 ### Phase 5: Model Selection
 
 Use Phase 0B to decide concrete model IDs, providers, executor plan, parallelism, and thinking. Then:
 
 - Assign `class` attributes based on Phase 2 complexity and node role: default, `hard`, `verify`, `review`.
 - Encode the chosen plan in the graph `model_stylesheet` so nodes inherit `llm_provider`, `llm_model`, and (optionally) `reasoning_effort`.
+
+#### Escalation chain generation
+
+When producing the Medium or High option, generate an `escalation_models` attribute for complex implementation nodes (class="hard"). The chain should:
+
+1. Include all available models ordered by cost (cheapest first, most expensive last)
+2. Use highest reasoning/thinking settings (the escalation is for capability, not speed)
+3. Skip models that are already the node's primary model (from the stylesheet)
+4. Set `max_retries` on nodes with escalation chains to accommodate the full chain: `(len(chain) + 1) * (retries_before_escalation + 1) - 1`
+
+Example for a Medium plan with kimi-k2.5 as the primary model:
+```dot
+impl_core [
+    shape=box, class="hard", max_retries=8,
+    escalation_models="zai:glm-4.7, google:gemini-pro, anthropic:claude-opus-4-6"
+]
+```
+
+For the Low option, omit `escalation_models` (single model, minimal cost).
 
 #### Provider-specific reasoning behavior
 
@@ -764,6 +801,7 @@ Common repairs (use validator output; do not guess blindly):
 - Remove any non-DOT text outside the `digraph { ... }`.
 - Fix quoting/escaping in string attributes (especially `model_stylesheet` and `prompt`).
 - Ensure required graph attrs exist: `goal`, `model_stylesheet`, `default_max_retry`, `retry_target`, `fallback_retry_target`.
+- Optional: `retries_before_escalation` (default: 2) — same-model retry count before escalating to the next model in a node's `escalation_models` chain. Applied globally; override with caution.
 - Ensure exactly one `start` and one `exit`, with correct `shape` and reachability.
 - Fix missing semicolons / commas / brackets in node/edge attribute lists.
 - Replace edge `label="success"` style routing with proper `condition="outcome=..."`.
@@ -803,6 +841,7 @@ Common repairs (use validator output; do not guess blindly):
 | `llm_model` | Override model for this node (overrides stylesheet) |
 | `llm_provider` | Override provider for this node |
 | `reasoning_effort` | `low`, `medium`, `high` |
+| `escalation_models` | Comma-separated `provider:model` pairs for capability escalation. When the node fails with `budget_exhausted` or `compilation_loop`, the engine cycles through these models after `retries_before_escalation` same-model retries. Example: `"kimi:kimi-k2.5, anthropic:claude-opus-4-6"` |
 | `fidelity` | Context fidelity: `full`, `truncate`, `compact`, `summary:low`, `summary:medium`, `summary:high` |
 | `thread_id` | Thread key for LLM session reuse under `full` fidelity |
 
@@ -860,7 +899,27 @@ Custom outcome values work: `outcome=port`, `outcome=skip`, `outcome=needs_fix`.
 24. **Local CXDB configs without launcher autostart.** In this repo, do not emit companion `run.yaml` that points at local CXDB endpoints but omits `cxdb.autostart` launcher wiring. That creates fragile manual setup and can silently attach to the wrong daemon.
 25. **Non-canonical fail payloads.** Do NOT emit `outcome=fail` or `outcome=retry` without both `failure_reason` and `details`.
 26. **Artifact pollution in feature diffs.** Do NOT allow build/cache/temp/backup artifacts in changed-file diffs unless explicitly required by the spec.
-27. **Overlapping fan-out write scopes.** Do NOT let parallel branches modify shared/core files; reserve shared edits for a dedicated post-fan-in integration node.
+27. **Overlapping fan-out write scopes.** Do NOT let parallel branches modify shared/core files; reserve shared edits for a dedicated post-fan-in integration node. See also the interface-pinning pattern below.
+
+#### Fan-out coordination: interface-pinning pattern
+
+When a fan-out involves branches that implement against shared types or interfaces, add a `define_contracts` or `impl_scaffold` node BEFORE the fan-out `component` node. This node writes comprehensive shared type definitions, constants, function signatures, and interface contracts to well-known paths. Fan-out branch prompts reference these files as **read-only inputs**.
+
+Why: Parallel branches run in isolated worktrees with no communication. If each branch independently defines shared types, they will diverge. The fan-in selects one winner and discards losers' changes, causing type mismatches at integration.
+
+Pattern:
+```
+impl_scaffold -> verify_scaffold -> check_scaffold -> fanout -> [branches] -> fanin
+```
+
+The scaffold prompt should:
+1. Define ALL shared types, constants, and enums comprehensively — anticipate what branches will need
+2. Create stub modules with correct function signatures for every parallel branch to implement against
+3. Verify the project compiles with stubs before proceeding to fan-out
+
+Each fan-out branch prompt should include:
+- "Read [SHARED_TYPE_FILES] — these are your interface contract. Do NOT modify these shared files."
+- "Implement ONLY your assigned module files."
 28. **`reasoning_effort` on Cerebras GLM 4.7.** Do NOT set `reasoning_effort` on GLM 4.7 nodes expecting it to control reasoning depth — that parameter only works on Cerebras `gpt-oss-120b`. GLM 4.7 reasoning is always on. The engine automatically sets `clear_thinking: false` for Cerebras agent-loop nodes to preserve reasoning context across turns.
 
 ## Notes on Reference Dotfile Conventions
