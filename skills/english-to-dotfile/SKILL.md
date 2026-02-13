@@ -414,14 +414,22 @@ cxdb:
     enabled: true
     command:
       - /home/user/code/kilroy/scripts/start-cxdb.sh
-    wait_timeout_ms: 30000
+    wait_timeout_ms: 60000
     poll_interval_ms: 250
     ui:
-      url: http://127.0.0.1:9010
+      url: http://127.0.0.1:9020
 ```
+
+Port layout:
+- **9009** — CXDB binary protocol (msgpack over TCP)
+- **9010** — CXDB HTTP API (`/v1/contexts`, `/health`, etc.)
+- **9020** — CXDB web UI (Next.js "Context Debugger / Turn DAG Viewer", served by nginx inside the container on port 80, mapped to host port 9020 by `start-cxdb.sh`)
+
+The UI port (9020) is distinct from the API port (9010). `scripts/start-cxdb.sh` maps container port 80 → host port 9020 via `-p ${UI_ADDR}:80` (where `UI_ADDR` defaults to `127.0.0.1:9020`, configurable via `KILROY_CXDB_UI_ADDR`). If the container was created before this mapping existed, the UI won't be reachable until the container is recreated.
 
 Rules:
 - Use the absolute launcher path shown above for this repo.
+- Set `ui.url` to `http://127.0.0.1:9020` (the UI port), NOT `http://127.0.0.1:9010` (the API port).
 - Prefer launcher autostart over manual "start CXDB first" prerequisites for local runs.
 - `scripts/start-cxdb.sh` is strict by default and rejects unmanaged healthy endpoints (to avoid accidentally using a test shim on the same ports).
 - If the user intentionally wants an external non-docker endpoint, document `KILROY_CXDB_ALLOW_EXTERNAL=1` in the run instructions (or disable autostart explicitly).
@@ -455,6 +463,15 @@ check_X -> impl_X  [condition="outcome=fail", label="retry"]
 ```
 
 For build pipelines, no exceptions: every implementation node (including `impl_setup`) must be followed by verify/check. `expand_spec` is the only build-pipeline node that may skip verification (use `auto_status=true` instead). Non-build workflows may use the relaxed 2-node pattern documented below.
+
+#### Turn budget (`max_agent_turns`)
+
+**Use `timeout` as the primary safety guard.** `max_agent_turns` is a secondary optimization — apply it once you have production turn-count data showing what "normal" looks like for each node class. A wrong turn limit is catastrophic: it kills productive work and wastes every turn the agent already completed (the agent can't write its status file). A wrong timeout just costs wall-clock time.
+
+If you do set `max_agent_turns`:
+- Omitted or `0` = unlimited (timeout-only guard).
+- `N` = hard cap at N turns (one turn = one LLM API call + tool execution). Resets per retry attempt.
+- Base values on observed P95/P99 turn counts, not guesses. Until you have that data, omit it.
 
 #### Goal gates
 
@@ -530,6 +547,7 @@ Default:
 - Use fan-out/fan-in for *thinking* stages (Definition of Done proposals, planning variants, review variants).
 - Avoid fanning out *implementation* in the same codebase; keep one code-writing node active at a time.
 - If implementation fan-out is explicitly requested, do it only with strict isolation (disjoint write scopes + shared files read-only) and a dedicated post-fan-in integration/merge node.
+- Fan-out branches should use 2–3 models from **different providers** to maximize diversity of perspective. Same-model fan-out provides only session-level variance; cross-provider fan-out yields genuinely independent reasoning. When the user specifies models for one fan-out stage (e.g., review), reuse those same provider/model assignments for other fan-out stages (DoD, planning) unless the user overrides.
 
 ```
 // Fan-out: one node fans to 3 parallel workers
@@ -753,7 +771,7 @@ Simple impl/verify prompts (5-10 lines) are fine for straightforward tasks. But 
 
 The reference dotfiles in `docs/strongdm/dot specs/` demonstrate production-quality prompts with multi-paragraph instructions, embedded shell commands with examples, numbered steps, and conditional branches within a single prompt.
 
-For high-turn-budget nodes (40+ turns) that produce compiled code, use the **progressive compilation pattern** to prevent late-stage build failures:
+For implementation nodes with a build step, use the **progressive build pattern** to prevent late-stage failures:
 
 ```
 Implementation approach:
@@ -865,7 +883,7 @@ Common repairs (use validator output; do not guess blindly):
 | `retry_target` | Node ID to jump to if this goal_gate fails |
 | `fallback_retry_target` | Secondary retry target |
 | `allow_partial` | `true` = accept PARTIAL_SUCCESS when retries exhausted instead of FAIL. Use on long-running nodes where partial progress is valuable. |
-| `max_agent_turns` | Session budget for this node. Set high enough for the scoped task to complete without premature provider failover. |
+| `max_agent_turns` | Optional turn budget: caps LLM request-response cycles. Omitted or `0` = unlimited. This is a secondary optimization — use `timeout` as the primary guard and add turn limits only once you have production data. See "Turn budget" section. |
 | `timeout` | Duration (e.g., `"300"`, `"900s"`, `"15m"`). Applies to any node type. Bare integers are seconds. |
 | `auto_status` | `true` = auto-generate SUCCESS outcome if handler writes no status.json. Only use on `expand_spec`. |
 | `llm_model` | Override model for this node (overrides stylesheet) |
@@ -953,6 +971,7 @@ Each fan-out branch prompt should include:
 28. **`reasoning_effort` on Cerebras GLM 4.7.** Do NOT set `reasoning_effort` on GLM 4.7 nodes expecting it to control reasoning depth — that parameter only works on Cerebras `gpt-oss-120b`. GLM 4.7 reasoning is always on. The engine automatically sets `clear_thinking: false` for Cerebras agent-loop nodes to preserve reasoning context across turns.
 29. **Parallel code-writing in a shared worktree (default disallowed).** Do NOT run multiple programming/implementation nodes in parallel that touch the same codebase state. If implementation fan-out is required, enforce strict isolation (disjoint write scopes, shared files read-only) and converge via an explicit integration/merge node.
 30. **Generating DOTs from scratch when a validated template exists.** For production-quality runs, start from `docs/strongdm/dot specs/consensus_task.dot` (or another proven template) and make minimal, validated edits. New topologies are allowed, but they are higher-risk and must be validated early/cheap to avoid expensive runaway loops.
+31. **Setting `max_agent_turns` without production data.** Do not guess turn limits. Use `timeout` as the primary safety guard. Add `max_agent_turns` only as a secondary clamp once you have observed turn-count distributions from production runs — a wrong turn limit kills productive work and wastes every turn the agent already completed.
 
 ## Notes on Reference Dotfile Conventions
 
@@ -1047,3 +1066,4 @@ Note how this example follows every rule:
 - Graph has `retry_target` and `fallback_retry_target`
 - Implementation and review prompts include `Goal: $goal`
 - Model stylesheet covers all four classes
+- Nodes use `timeout` for safety; `max_agent_turns` omitted (add later from production data)
