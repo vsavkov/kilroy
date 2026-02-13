@@ -22,7 +22,7 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	applyConfigDefaults(cfg)
 
 	// Prepare graph (parse + transforms + validate).
-	g, _, err := Prepare(dotSource)
+	g, _, err := PrepareWithOptions(dotSource, PrepareOptions{RepoPath: cfg.Repo.Path})
 	if err != nil {
 		return nil, err
 	}
