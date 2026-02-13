@@ -205,6 +205,9 @@ type Result struct {
 
 type PrepareOptions struct {
 	Transforms []Transform
+	// RepoPath is the repository root directory. When set, prompt_file attributes
+	// on nodes are resolved relative to this path before other transforms run.
+	RepoPath string
 }
 
 // Prepare parses/transforms/validates a graph.
@@ -226,7 +229,13 @@ func PrepareWithOptions(dotSource []byte, opts PrepareOptions) (*model.Graph, []
 		return nil, nil, err
 	}
 
-	// Built-in transforms: stylesheet, $goal expansion.
+	// Built-in transforms: prompt_file resolution, stylesheet, $goal expansion.
+	// prompt_file runs first so loaded content gets stylesheet defaults and $goal expansion.
+	if opts.RepoPath != "" {
+		if err := expandPromptFiles(g, opts.RepoPath); err != nil {
+			return g, nil, fmt.Errorf("prompt_file expansion: %w", err)
+		}
+	}
 	if raw := strings.TrimSpace(g.Attrs["model_stylesheet"]); raw != "" {
 		rules, err := style.ParseStylesheet(raw)
 		if err != nil {
@@ -265,7 +274,7 @@ func Run(ctx context.Context, dotSource []byte, opts RunOptions) (*Result, error
 	if err := opts.applyDefaults(); err != nil {
 		return nil, err
 	}
-	g, _, err := Prepare(dotSource)
+	g, _, err := PrepareWithOptions(dotSource, PrepareOptions{RepoPath: opts.RepoPath})
 	if err != nil {
 		return nil, err
 	}

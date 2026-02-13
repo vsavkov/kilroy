@@ -46,6 +46,7 @@ func Validate(g *model.Graph) []Diagnostic {
 	diags = append(diags, lintGoalGateHasRetry(g)...)
 	diags = append(diags, lintFidelityValid(g)...)
 	diags = append(diags, lintPromptOnCodergenNodes(g)...)
+	diags = append(diags, lintPromptFileConflict(g)...)
 	diags = append(diags, lintLLMProviderPresent(g)...)
 	diags = append(diags, lintLoopRestartFailureClassGuard(g)...)
 	diags = append(diags, lintEscalationModelsSyntax(g)...)
@@ -564,6 +565,33 @@ func conditionHasTransientInfraGuard(condExpr string) bool {
 		}
 	}
 	return false
+}
+
+func lintPromptFileConflict(g *model.Graph) []Diagnostic {
+	var diags []Diagnostic
+	for id, n := range g.Nodes {
+		if n == nil {
+			continue
+		}
+		pf := strings.TrimSpace(n.Attr("prompt_file", ""))
+		if pf == "" {
+			continue
+		}
+		// prompt_file should have been resolved by the engine's expandPromptFiles transform
+		// before validation runs. If it's still present, either RepoPath wasn't set (e.g.
+		// standalone validate) or the transform didn't run. Warn so the user knows.
+		hasPrompt := strings.TrimSpace(n.Attr("prompt", "")) != "" || strings.TrimSpace(n.Attr("llm_prompt", "")) != ""
+		if hasPrompt {
+			diags = append(diags, Diagnostic{
+				Rule:     "prompt_file_conflict",
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("node has both prompt_file and prompt/llm_prompt — use one or the other"),
+				NodeID:   id,
+				Fix:      "remove either prompt_file or prompt",
+			})
+		}
+	}
+	return diags
 }
 
 func lintEscalationModelsSyntax(g *model.Graph) []Diagnostic {
