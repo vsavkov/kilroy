@@ -150,7 +150,9 @@ type Engine struct {
 	terminalOutcomePersisted bool
 
 	// Deterministic failure cycle detection: tracks failure signatures across
-	// consecutive stages in the main loop. Resets on any successful stage.
+	// stages in the main loop. Never reset on success — signatures are keyed
+	// by nodeID so a successful node cannot collide with a failing one, and
+	// resetting would defeat the breaker in impl-succeeds/verify-fails cycles.
 	loopFailureSignatures map[string]int
 
 	progressMu sync.Mutex
@@ -531,7 +533,7 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 		// if the same signature has repeated too many times — this prevents
 		// infinite loops when, e.g., a provider auth token expires and
 		// every stage fails identically.
-		if isFailureLoopRestartOutcome(out) && normalizedFailureClassOrDefault(failureClass) == failureClassDeterministic {
+		if isFailureLoopRestartOutcome(out) && isSignatureTrackedFailureClass(failureClass) {
 			sig := restartFailureSignature(node.ID, out, failureClass)
 			if sig != "" {
 				if e.loopFailureSignatures == nil {
@@ -564,8 +566,6 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 					return nil, fmt.Errorf("%s", reason)
 				}
 			}
-		} else if out.Status == runtime.StatusSuccess {
-			e.loopFailureSignatures = nil // reset on success
 		}
 
 		// Checkpoint (git commit + checkpoint.json).
@@ -1671,6 +1671,78 @@ func selectNextEdge(g *model.Graph, from string, out runtime.Outcome, ctx *runti
 	}
 
 	return bestEdge(uncond), nil
+}
+
+// selectAllEligibleEdges returns all edges that are eligible for traversal from the given node.
+// When multiple edges are returned, the caller should treat this as an implicit fan-out.
+// Preferred-label and suggested-next-ID narrowing still apply — if they narrow to a single edge,
+// only that edge is returned (no fan-out).
+func selectAllEligibleEdges(g *model.Graph, from string, out runtime.Outcome, ctx *runtime.Context) ([]*model.Edge, error) {
+	edges := g.Outgoing(from)
+	if len(edges) == 0 {
+		return nil, nil
+	}
+
+	// Eligible conditional edges.
+	var condMatched []*model.Edge
+	for _, e := range edges {
+		if e == nil {
+			continue
+		}
+		c := strings.TrimSpace(e.Condition())
+		if c == "" {
+			continue
+		}
+		ok, err := cond.Evaluate(c, out, ctx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			condMatched = append(condMatched, e)
+		}
+	}
+	if len(condMatched) > 0 {
+		return condMatched, nil
+	}
+
+	// Unconditional edges are eligible when no condition matched.
+	var uncond []*model.Edge
+	for _, e := range edges {
+		if e == nil {
+			continue
+		}
+		if strings.TrimSpace(e.Condition()) == "" {
+			uncond = append(uncond, e)
+		}
+	}
+	if len(uncond) == 0 {
+		return nil, nil
+	}
+
+	// Preferred label match narrows to one.
+	if strings.TrimSpace(out.PreferredLabel) != "" {
+		want := normalizeLabel(out.PreferredLabel)
+		sort.SliceStable(uncond, func(i, j int) bool { return uncond[i].Order < uncond[j].Order })
+		for _, e := range uncond {
+			if normalizeLabel(e.Label()) == want {
+				return []*model.Edge{e}, nil
+			}
+		}
+	}
+
+	// Suggested next IDs narrow to one.
+	if len(out.SuggestedNextIDs) > 0 {
+		sort.SliceStable(uncond, func(i, j int) bool { return uncond[i].Order < uncond[j].Order })
+		for _, suggested := range out.SuggestedNextIDs {
+			for _, e := range uncond {
+				if e.To == suggested {
+					return []*model.Edge{e}, nil
+				}
+			}
+		}
+	}
+
+	return uncond, nil
 }
 
 func bestEdge(edges []*model.Edge) *model.Edge {
