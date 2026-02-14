@@ -212,7 +212,8 @@ For iterative build workflows, keep this structure unless the user asks for a di
 - Graph attrs include: `default_max_retry`, `retry_target`, `fallback_retry_target`.
 - Inner repair loop: `implement -> verify -> check -> implement` on fail.
 - Outer improvement loop: `review_consensus -> postmortem -> plan_*` with `loop_restart=true`.
-- Routing stays outcome-based (`outcome=pass|retry|fail|skip|done`).
+- Routing stays outcome-based (`outcome=success|retry|fail|skip|done` and custom values where needed).
+- For any `goal_gate=true` node that can route to terminal, the terminal success route must use `condition="outcome=success"` or `condition="outcome=partial_success"`.
 - Do not add visit-count loop breakers (for example `max_node_visits`) by default.
 
 ### Phase 1: Requirements Expansion
@@ -497,6 +498,11 @@ For build pipelines, no exceptions: every implementation node (including `impl_s
 Place `goal_gate=true` on:
 - The final integration test node
 - Any node producing a critical artifact (e.g., valid font file, working binary)
+
+Goal-gate status contract:
+- `goal_gate=true` is only satisfied by canonical `success` or `partial_success`.
+- If a goal-gate node routes to terminal, use `condition="outcome=success"` (or `partial_success`) on that terminal edge.
+- Do not use `outcome=pass` as the success signal for a terminal route from a goal gate.
 
 #### Review node
 
@@ -974,6 +980,7 @@ Custom outcome values work: `outcome=port`, `outcome=skip`, `outcome=needs_fix`.
 25. **Non-canonical fail payloads.** Do NOT emit `outcome=fail` or `outcome=retry` without both `failure_reason` and `details`.
 26. **Artifact pollution in feature diffs.** Do NOT allow build/cache/temp/backup artifacts in changed-file diffs unless explicitly required by the spec.
 27. **Overlapping fan-out write scopes.** Do NOT let parallel branches modify shared/core files; reserve shared edits for a dedicated post-fan-in integration node. See also the interface-pinning pattern below.
+28. **Using `outcome=pass` as goal-gate terminal success.** For `goal_gate=true` nodes, do NOT route to `shape=Msquare` on `condition="outcome=pass"` (or other custom success aliases). Use `condition="outcome=success"` or `condition="outcome=partial_success"` so goal-gate contract checks and exit routing stay aligned.
 
 #### Fan-out coordination: interface-pinning pattern
 
@@ -1009,4 +1016,3 @@ Some reference dotfiles in `docs/strongdm/dot specs/` use attributes not defined
 - `is_codergen` — codergen handler is determined by shape, not by this flag
 - `context_fidelity_default` — use `default_fidelity` (the spec-canonical name; the engine accepts both)
 - `context_thread_default` — use graph-level `thread_id` (the engine accepts both)
-
