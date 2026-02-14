@@ -97,7 +97,7 @@ func runProviderCLIPreflight(ctx context.Context, g *model.Graph, runtimes map[s
 	// Validate CLI-only models: fail early if a CLI-only model (e.g.,
 	// gpt-5.3-codex-spark) is used but its provider is not configured with
 	// backend=cli.
-	if err := validateCLIOnlyModels(g, runtimes, report); err != nil {
+	if err := validateCLIOnlyModels(g, runtimes, opts.ForceModels, report); err != nil {
 		return report, err
 	}
 
@@ -112,7 +112,7 @@ func runProviderCLIPreflight(ctx context.Context, g *model.Graph, runtimes map[s
 	return report, nil
 }
 
-func validateCLIOnlyModels(g *model.Graph, runtimes map[string]ProviderRuntime, report *providerPreflightReport) error {
+func validateCLIOnlyModels(g *model.Graph, runtimes map[string]ProviderRuntime, forceModels map[string]string, report *providerPreflightReport) error {
 	if g == nil {
 		return nil
 	}
@@ -124,6 +124,11 @@ func validateCLIOnlyModels(g *model.Graph, runtimes map[string]ProviderRuntime, 
 		modelID := strings.TrimSpace(n.Attr("llm_model", ""))
 		if modelID == "" {
 			modelID = strings.TrimSpace(n.Attr("model", ""))
+		}
+		// When force-model is active for this provider, the graph-declared
+		// model is replaced at runtime. Validate the forced model instead.
+		if forcedID, forced := forceModelForProvider(forceModels, provider); forced {
+			modelID = forcedID
 		}
 		if !isCLIOnlyModel(modelID) {
 			continue

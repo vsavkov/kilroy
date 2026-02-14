@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
@@ -26,14 +27,24 @@ func TestCLIOnlyModelOverride_SwitchesBackendAndWarns(t *testing.T) {
 	node.Attrs["llm_model"] = "gpt-5.3-codex-spark"
 	node.Attrs["shape"] = "box"
 
-	// Create a minimal execution with an Engine to capture warnings.
+	// Create an execution with temp dirs to isolate artifacts and an Engine
+	// to capture warnings.
 	eng := &Engine{}
-	exec := &Execution{Engine: eng}
+	exec := &Execution{
+		Engine:      eng,
+		LogsRoot:    t.TempDir(),
+		WorktreeDir: t.TempDir(),
+	}
+
+	// Short timeout: we only need the override to fire (before runCLI tries
+	// to invoke a real binary). Prevents stalls if codex is in PATH.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Run will likely fail (no real CLI binary), but the override should fire
 	// first. We don't check the error — runCLI may return a failure outcome
 	// instead of an error.
-	_, _, _ = router.Run(context.Background(), exec, node, "test prompt")
+	_, _, _ = router.Run(ctx, exec, node, "test prompt")
 
 	// Verify the CLI-only override warning was emitted.
 	found := false
@@ -62,10 +73,17 @@ func TestCLIOnlyModelOverride_RegularModelNoOverride(t *testing.T) {
 	node.Attrs["shape"] = "box"
 
 	eng := &Engine{}
-	exec := &Execution{Engine: eng}
+	exec := &Execution{
+		Engine:      eng,
+		LogsRoot:    t.TempDir(),
+		WorktreeDir: t.TempDir(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	// Run will fail (no API client), but no CLI-only override should fire.
-	_, _, _ = router.Run(context.Background(), exec, node, "test prompt")
+	_, _, _ = router.Run(ctx, exec, node, "test prompt")
 
 	for _, w := range eng.Warnings {
 		if strings.Contains(w, "cli-only model override") {
