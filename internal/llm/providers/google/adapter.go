@@ -15,8 +15,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/strongdm/kilroy/internal/llm"
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 type Adapter struct {

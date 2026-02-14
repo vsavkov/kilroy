@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/dot"
+	"github.com/danshapiro/kilroy/internal/attractor/dot"
 )
 
 func TestValidate_StartAndExitNodeRules(t *testing.T) {

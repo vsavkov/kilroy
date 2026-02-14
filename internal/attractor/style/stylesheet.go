@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 type SelectorKind int

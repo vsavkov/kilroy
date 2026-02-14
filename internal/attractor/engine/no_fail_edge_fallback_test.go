@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func TestRun_NoMatchingFailEdge_FallsBackToRetryTarget(t *testing.T) {

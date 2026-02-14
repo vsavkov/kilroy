@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/procutil"
-	"github.com/strongdm/kilroy/internal/cxdb"
+	"github.com/danshapiro/kilroy/internal/attractor/procutil"
+	"github.com/danshapiro/kilroy/internal/cxdb"
 )
 
 // cxdbManifest is the subset of manifest.json we need for CXDB follow.

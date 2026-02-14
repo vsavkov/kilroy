@@ -11,7 +11,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	"github.com/strongdm/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llm"
 )
 
 type TruncationStrategy string

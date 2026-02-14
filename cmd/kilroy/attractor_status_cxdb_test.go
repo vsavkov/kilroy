@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/cxdb"
+	"github.com/danshapiro/kilroy/internal/cxdb"
 )
 
 func TestLoadCXDBManifest_ParsesManifest(t *testing.T) {

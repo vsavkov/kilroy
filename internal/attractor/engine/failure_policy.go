@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/strongdm/kilroy/internal/attractor/runtime"
+import "github.com/danshapiro/kilroy/internal/attractor/runtime"
 
 // retryableFailureClasses lists failure classes that should trigger automatic retries.
 // transient_infra: temporary infrastructure issues (API timeouts, rate limits)

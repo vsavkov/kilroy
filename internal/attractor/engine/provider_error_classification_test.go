@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/llm"
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 func TestClassifyProviderCLIError_AnthropicStreamJSONRequiresVerbose(t *testing.T) {

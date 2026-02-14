@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/procutil"
-	"github.com/strongdm/kilroy/internal/attractor/runstate"
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/procutil"
+	"github.com/danshapiro/kilroy/internal/attractor/runstate"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 type verifiedProcess struct {

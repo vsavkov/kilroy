@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/cxdb"
+	"github.com/danshapiro/kilroy/internal/cxdb"
 )
 
 // ResumeFromCXDB resumes a run by reading the latest checkpoint pointer from the CXDB context head.

@@ -27,7 +27,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func TestNormalizedFailureClass_BudgetExhausted(t *testing.T) {
@@ -209,7 +209,7 @@ Replace `failure_policy.go` contents:
 ```go
 package engine
 
-import "github.com/strongdm/kilroy/internal/attractor/runtime"
+import "github.com/danshapiro/kilroy/internal/attractor/runtime"
 
 // retryableFailureClasses lists failure classes that should trigger automatic retries.
 // transient_infra: temporary infrastructure issues (API timeouts, rate limits)
@@ -359,7 +359,7 @@ package engine
 import (
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 const defaultRetriesBeforeEscalation = 2

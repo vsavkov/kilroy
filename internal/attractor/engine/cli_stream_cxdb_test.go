@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/cxdb"
+	"github.com/danshapiro/kilroy/internal/cxdb"
 )
 
 func TestEmitCXDBCLIStreamEvent_AssistantMessage(t *testing.T) {

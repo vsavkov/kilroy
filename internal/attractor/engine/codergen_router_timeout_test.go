@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 func TestResolveAgentLoopCommandTimeouts_NodeAttrsOverrideGraph(t *testing.T) {

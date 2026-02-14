@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func buildFidelityPreamble(ctx *runtime.Context, runID string, goal string, fidelity string, prevNode string, completed []string) string {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/attractor/gitutil"
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/gitutil"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 // runSubgraphUntil executes a subgraph starting at startNodeID and stops when the next hop would enter stopNodeID.

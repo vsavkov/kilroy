@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/procutil"
+	"github.com/danshapiro/kilroy/internal/attractor/procutil"
 )
 
 // runFollowProgress tails progress.ndjson with formatted output until the run

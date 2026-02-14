@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/strongdm/kilroy/internal/attractor/engine"
+	"github.com/danshapiro/kilroy/internal/attractor/engine"
 )
 
 //go:embed ingest_prompt.tmpl

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/modelmeta"
+	"github.com/danshapiro/kilroy/internal/modelmeta"
 )
 
 // ModelInfo is the normalized model metadata entry, primarily sourced from OpenRouter model info

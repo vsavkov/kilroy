@@ -152,7 +152,7 @@ Update provider aliases in `internal/providerspec/builtin.go`:
 Delegate `NormalizeProvider` to provider spec canonicalization in `internal/modelmeta/modelmeta.go`:
 
 ```go
-import "github.com/strongdm/kilroy/internal/providerspec"
+import "github.com/danshapiro/kilroy/internal/providerspec"
 
 func NormalizeProvider(p string) string {
 	return providerspec.CanonicalProviderKey(p)
@@ -264,7 +264,7 @@ Expected: FAIL with unsupported provider error.
 In `cmd/kilroy/main.go`, use provider-spec canonicalization and allow all built-in provider keys:
 
 ```go
-import "github.com/strongdm/kilroy/internal/providerspec"
+import "github.com/danshapiro/kilroy/internal/providerspec"
 
 func normalizeRunProviderKey(provider string) string {
 	return providerspec.CanonicalProviderKey(provider)

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/modelmeta"
+	"github.com/danshapiro/kilroy/internal/modelmeta"
 )
 
 // versionDotRe matches dots between digits in model version numbers

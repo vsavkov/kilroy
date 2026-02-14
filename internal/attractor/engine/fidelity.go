@@ -3,7 +3,7 @@ package engine
 import (
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 var validFidelityModes = map[string]bool{

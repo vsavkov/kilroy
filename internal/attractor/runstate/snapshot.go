@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/procutil"
+	"github.com/danshapiro/kilroy/internal/attractor/procutil"
 )
 
 type finalOutcomeDoc struct {

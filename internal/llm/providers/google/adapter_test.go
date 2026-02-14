@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llm"
 )
 
 func TestAdapter_Complete_MapsToGeminiGenerateContent(t *testing.T) {

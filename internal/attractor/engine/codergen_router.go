@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/agent"
-	"github.com/strongdm/kilroy/internal/attractor/model"
-	"github.com/strongdm/kilroy/internal/attractor/modeldb"
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
-	"github.com/strongdm/kilroy/internal/llm"
-	"github.com/strongdm/kilroy/internal/llmclient"
+	"github.com/danshapiro/kilroy/internal/agent"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/modeldb"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llmclient"
 )
 
 // anthropicVersionDotRe matches dots between digits in model version numbers

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 func TestDelayForAttempt_NoJitter_ConstantFactorOne(t *testing.T) {

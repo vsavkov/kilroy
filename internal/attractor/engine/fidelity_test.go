@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 func TestResolveFidelityMode_ContextFidelityDefault(t *testing.T) {

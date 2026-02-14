@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llm"
 )
 
 func TestToolRegistry_UnknownTool_ReturnsErrorResult(t *testing.T) {

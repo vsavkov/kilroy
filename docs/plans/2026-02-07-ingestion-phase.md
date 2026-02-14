@@ -660,7 +660,7 @@ import (
 	"os/exec"
 	"strings"
 
-	attrengine "github.com/strongdm/kilroy/internal/attractor/engine"
+	attrengine "github.com/danshapiro/kilroy/internal/attractor/engine"
 )
 
 // Options configures an ingestion run.
@@ -810,7 +810,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/ingest"
+	"github.com/danshapiro/kilroy/internal/attractor/ingest"
 )
 ```
 
@@ -849,7 +849,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/engine"
+	"github.com/danshapiro/kilroy/internal/attractor/engine"
 )
 
 // TestExtractAndValidateResearchDotFiles tests that existing research .dot files

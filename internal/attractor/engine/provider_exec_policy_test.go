@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 func TestResolveProviderExecutable_RealRejectsEnvOverrides(t *testing.T) {

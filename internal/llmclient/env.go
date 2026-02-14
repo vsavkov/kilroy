@@ -1,10 +1,10 @@
 package llmclient
 
 import (
-	"github.com/strongdm/kilroy/internal/llm"
-	_ "github.com/strongdm/kilroy/internal/llm/providers/anthropic"
-	_ "github.com/strongdm/kilroy/internal/llm/providers/google"
-	_ "github.com/strongdm/kilroy/internal/llm/providers/openai"
+	"github.com/danshapiro/kilroy/internal/llm"
+	_ "github.com/danshapiro/kilroy/internal/llm/providers/anthropic"
+	_ "github.com/danshapiro/kilroy/internal/llm/providers/google"
+	_ "github.com/danshapiro/kilroy/internal/llm/providers/openai"
 )
 
 // NewFromEnv registers any provider adapters that can be constructed from environment variables.

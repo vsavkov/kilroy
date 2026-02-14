@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/procutil"
+	"github.com/danshapiro/kilroy/internal/attractor/procutil"
 )
 
 func requireProcFS(t *testing.T) {

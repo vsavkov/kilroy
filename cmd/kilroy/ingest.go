@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/ingest"
+	"github.com/danshapiro/kilroy/internal/attractor/ingest"
 )
 
 type ingestOptions struct {

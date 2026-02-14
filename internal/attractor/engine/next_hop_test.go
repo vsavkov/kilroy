@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/dot"
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/dot"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func TestResolveNextHop_FanInFail_DoesNotPickUnconditionalEdge(t *testing.T) {

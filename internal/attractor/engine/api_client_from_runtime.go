@@ -6,12 +6,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/llm"
-	"github.com/strongdm/kilroy/internal/llm/providers/anthropic"
-	"github.com/strongdm/kilroy/internal/llm/providers/google"
-	"github.com/strongdm/kilroy/internal/llm/providers/openai"
-	"github.com/strongdm/kilroy/internal/llm/providers/openaicompat"
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llm/providers/anthropic"
+	"github.com/danshapiro/kilroy/internal/llm/providers/google"
+	"github.com/danshapiro/kilroy/internal/llm/providers/openai"
+	"github.com/danshapiro/kilroy/internal/llm/providers/openaicompat"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 func newAPIClientFromProviderRuntimes(runtimes map[string]ProviderRuntime) (*llm.Client, error) {

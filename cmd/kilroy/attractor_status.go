@@ -6,7 +6,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/strongdm/kilroy/internal/attractor/runstate"
+	"github.com/danshapiro/kilroy/internal/attractor/runstate"
 )
 
 func attractorStatus(args []string) {

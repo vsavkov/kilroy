@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 // BackoffConfig configures retry delays. This matches the attractor-spec BackoffConfig fields.

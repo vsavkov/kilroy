@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/cxdb"
+	"github.com/danshapiro/kilroy/internal/cxdb"
 	"github.com/zeebo/blake3"
 )
 

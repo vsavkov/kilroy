@@ -1,8 +1,8 @@
 package engine
 
-import "github.com/strongdm/kilroy/internal/attractor/model"
+import "github.com/danshapiro/kilroy/internal/attractor/model"
 
-import "github.com/strongdm/kilroy/internal/attractor/runtime"
+import "github.com/danshapiro/kilroy/internal/attractor/runtime"
 
 func NewContextWithGraphAttrs(g *model.Graph) *runtime.Context {
 	ctx := runtime.NewContext()

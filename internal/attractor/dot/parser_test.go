@@ -3,7 +3,7 @@ package dot
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 func TestParse_SimpleChainedEdgesAndDefaults(t *testing.T) {

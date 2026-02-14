@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 func TestNewAPIClientFromProviderRuntimes_RegistersAdaptersByProtocol(t *testing.T) {

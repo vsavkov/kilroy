@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func TestLoopRestart_FailsFastOnEmptyBaseLogsRoot(t *testing.T) {

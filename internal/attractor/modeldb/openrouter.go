@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/modelmeta"
+	"github.com/danshapiro/kilroy/internal/modelmeta"
 )
 
 type openRouterPayload struct {

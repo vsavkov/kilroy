@@ -1,6 +1,6 @@
 package llm
 
-import "github.com/strongdm/kilroy/internal/providerspec"
+import "github.com/danshapiro/kilroy/internal/providerspec"
 
 const kimiCodingMinMaxTokens = 16000
 

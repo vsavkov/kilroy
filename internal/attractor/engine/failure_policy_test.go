@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/runtime"
+	"github.com/danshapiro/kilroy/internal/attractor/runtime"
 )
 
 func TestShouldRetryOutcome_ClassGated(t *testing.T) {

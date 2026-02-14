@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/strongdm/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/providerspec"
 )
 
 type ProviderRuntime struct {

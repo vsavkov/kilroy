@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/strongdm/kilroy/internal/llm"
+	"github.com/danshapiro/kilroy/internal/llm"
 )
 
 func TestSession_MaxToolRoundsPerInput_StopsLoop(t *testing.T) {

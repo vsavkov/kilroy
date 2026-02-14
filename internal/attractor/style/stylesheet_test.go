@@ -3,7 +3,7 @@ package style
 import (
 	"testing"
 
-	"github.com/strongdm/kilroy/internal/attractor/model"
+	"github.com/danshapiro/kilroy/internal/attractor/model"
 )
 
 func TestStylesheet_ParseAndApply(t *testing.T) {

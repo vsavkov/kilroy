@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/strongdm/kilroy/internal/attractor/engine"
-	"github.com/strongdm/kilroy/internal/providerspec"
-	"github.com/strongdm/kilroy/internal/version"
+	"github.com/danshapiro/kilroy/internal/attractor/engine"
+	"github.com/danshapiro/kilroy/internal/providerspec"
+	"github.com/danshapiro/kilroy/internal/version"
 )
 
 func signalCancelContext() (context.Context, func()) {

@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/strongdm/kilroy/internal/llm"
+import "github.com/danshapiro/kilroy/internal/llm"
 
 type TurnKind string
 

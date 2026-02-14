@@ -1,4 +1,4 @@
-module github.com/strongdm/kilroy
+module github.com/danshapiro/kilroy
 
 go 1.25
 
