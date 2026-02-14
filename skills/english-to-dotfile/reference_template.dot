@@ -42,7 +42,7 @@ digraph reference_template {
     // DoD routing — skip DoD generation on loop iterations
     // =========================================================================
     check_dod [
-        shape=diamond,
+        shape=box,
         label="DoD exists?",
         prompt="Check if .ai/definition_of_done.md exists and contains substantive criteria.\n\nWrite status JSON to $KILROY_STAGE_STATUS_PATH.\noutcome=has_dod if yes, outcome=needs_dod if no."
     ]
