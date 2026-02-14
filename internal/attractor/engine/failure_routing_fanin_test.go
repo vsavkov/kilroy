@@ -161,9 +161,16 @@ digraph G {
 	}
 
 	// Verify the run did NOT follow retry_target back to impl_setup after fan-in failure.
+	// Check both edge_selected and no_matching_fail_edge_fallback events — the latter
+	// is what the retry_target fallback emits (distinct from the edge_selected path).
 	progressPath := filepath.Join(logsRoot, "progress.ndjson")
 	if fanInEdgeWasSelected(t, progressPath, "join", "impl_setup") {
 		t.Fatalf("engine followed retry_target from join to impl_setup despite deterministic failure")
+	}
+	for _, ev := range mustReadProgressEventsFile(t, progressPath) {
+		if anyToString(ev["event"]) == "no_matching_fail_edge_fallback" && anyToString(ev["node_id"]) == "join" {
+			t.Fatalf("retry_target fallback bypassed fan-in deterministic guard: retry_target=%s", anyToString(ev["retry_target"]))
+		}
 	}
 
 	// Verify final.json was written with failure status.

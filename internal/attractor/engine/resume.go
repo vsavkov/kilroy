@@ -375,8 +375,12 @@ func resumeFromLogsRoot(ctx context.Context, logsRoot string, ov ResumeOverrides
 	if nextHop == nil || nextHop.Edge == nil {
 		if lastOutcome.Status == runtime.StatusFail {
 			// Mirror forward-path fallback: try the retry_target chain before dying.
+			// Skip for fan-in nodes with deterministic failures — resolveNextHop
+			// already considered retry_target and intentionally blocked it.
+			fanInDeterministic := isFanInFailureLike(eng.Graph, lastNodeID, lastOutcome.Status) &&
+				normalizedFailureClassOrDefault(classifyFailureClass(lastOutcome)) == failureClassDeterministic
 			retryTarget := resolveRetryTarget(eng.Graph, lastNodeID)
-			if retryTarget != "" {
+			if retryTarget != "" && !fanInDeterministic {
 				eng.appendProgress(map[string]any{
 					"event":          "no_matching_fail_edge_fallback",
 					"node_id":        lastNodeID,

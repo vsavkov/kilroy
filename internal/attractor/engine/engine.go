@@ -642,8 +642,13 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 		if nextHop == nil || nextHop.Edge == nil {
 			if out.Status == runtime.StatusFail {
 				// Before dying, try the retry_target chain (same fallback as goal gates).
+				// Skip for fan-in nodes with deterministic failures — resolveNextHop
+				// already considered retry_target and intentionally blocked it to
+				// prevent infinite loops where the same branches fail identically.
+				fanInDeterministic := isFanInFailureLike(e.Graph, node.ID, out.Status) &&
+					normalizedFailureClassOrDefault(failureClass) == failureClassDeterministic
 				retryTarget := resolveRetryTarget(e.Graph, node.ID)
-				if retryTarget != "" {
+				if retryTarget != "" && !fanInDeterministic {
 					e.appendProgress(map[string]any{
 						"event":          "no_matching_fail_edge_fallback",
 						"node_id":        node.ID,
