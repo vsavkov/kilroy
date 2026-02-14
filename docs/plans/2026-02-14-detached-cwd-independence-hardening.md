@@ -34,7 +34,7 @@ Root-cause chain:
 
 1. **Architectural ownership:** CWD validity is runtime infrastructure, not dotfile content. Fix belongs in launcher/runtime code, not graph generation skills.
 2. **Defense in depth:** Explicit `cmd.Dir` + absolute run paths prevent process-level CWD drift; in-memory absolute schema URIs prevent library-level CWD lookup.
-3. **Correct failure semantics:** Local deterministic bootstrap failures should not trigger provider failover. This avoids noisy failover loops and faster surfaces actionable errors.
+3. **Correct failure semantics:** Local deterministic bootstrap failures should not trigger provider failover. This avoids noisy failover loops and surfaces actionable errors faster.
 4. **Low-risk, high-leverage:** Changes are localized to launch path, schema compile helpers, and failover classification, with regression tests at each layer.
 
 ---
@@ -92,15 +92,12 @@ package jsonschemautil
 
 import (
     "bytes"
-    "crypto/sha256"
-    "encoding/hex"
     "encoding/json"
-    "fmt"
 
     "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
-func CompileMapSchema(schema map[string]any, draft *jsonschema.Draft) (*jsonschema.Schema, error) {
+func CompileMapSchema(schema map[string]any, draft jsonschema.Draft) (*jsonschema.Schema, error) {
     c := jsonschema.NewCompiler()
     if draft != nil {
         c.Draft = draft
@@ -109,8 +106,7 @@ func CompileMapSchema(schema map[string]any, draft *jsonschema.Draft) (*jsonsche
     if err != nil {
         return nil, err
     }
-    sum := sha256.Sum256(b)
-    uri := fmt.Sprintf("mem://schema/%s.json", hex.EncodeToString(sum[:8]))
+    uri := "mem://schema/inline.json"
     if err := c.AddResource(uri, bytes.NewReader(b)); err != nil {
         return nil, err
     }
@@ -181,6 +177,7 @@ with:
 ```go
 return jsonschemautil.CompileMapSchema(params, jsonschema.Draft2020) // llm
 return jsonschemautil.CompileMapSchema(params, nil)                  // agent
+return jsonschemautil.CompileMapSchema(schema, jsonschema.Draft2020) // llm GenerateObject compileJSONSchema
 ```
 
 Keep behavior otherwise identical.
@@ -219,7 +216,15 @@ Add path normalization test:
 
 ```go
 func TestResolveDetachedPaths_ConvertsRelativeToAbsolute(t *testing.T) {
-    t.Chdir(tempDir)
+    tempDir := t.TempDir()
+    oldWD, err := os.Getwd()
+    if err != nil {
+        t.Fatalf("getwd: %v", err)
+    }
+    if err := os.Chdir(tempDir); err != nil {
+        t.Fatalf("chdir temp: %v", err)
+    }
+    t.Cleanup(func() { _ = os.Chdir(oldWD) })
     gotGraph, gotConfig, gotLogs, err := resolveDetachedPaths("g.dot", "run.yaml", "logs")
     // assert filepath.IsAbs(...) for all
 }
@@ -310,7 +315,7 @@ Add local deterministic bootstrap detection in `shouldFailoverLLMError`:
 func isLocalBootstrapError(err error) bool {
     s := strings.ToLower(strings.TrimSpace(err.Error()))
     return strings.Contains(s, "getwd: no such file or directory") ||
-        strings.Contains(s, "working directory") && strings.Contains(s, "no such file or directory")
+        strings.Contains(s, "tool read_file schema: getwd:")
 }
 ```
 
@@ -459,4 +464,3 @@ Success criteria:
 2. No run aborts with `tool read_file schema: getwd: no such file or directory`.
 3. Failover logic does not switch providers for local bootstrap/CWD errors.
 4. Detached runs work regardless of launcher CWD lifecycle.
-
