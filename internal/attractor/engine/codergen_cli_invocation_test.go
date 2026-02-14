@@ -187,6 +187,19 @@ func TestBuildCodexIsolatedEnv_ConfiguresCodexScopedOverrides(t *testing.T) {
 	}
 }
 
+func TestEnvHasKey(t *testing.T) {
+	env := []string{"HOME=/tmp", "PATH=/usr/bin", "CARGO_TARGET_DIR=/foo/bar"}
+	if !envHasKey(env, "CARGO_TARGET_DIR") {
+		t.Fatal("expected CARGO_TARGET_DIR to be found")
+	}
+	if envHasKey(env, "CARGO_HOME") {
+		t.Fatal("expected CARGO_HOME to not be found")
+	}
+	if envHasKey(nil, "HOME") {
+		t.Fatal("expected nil env to return false")
+	}
+}
+
 func TestIsStateDBDiscrepancy_MatchesRecordDiscrepancySignature(t *testing.T) {
 	if !isStateDBDiscrepancy("fatal: record_discrepancy while loading thread state") {
 		t.Fatalf("expected bare record_discrepancy signature to match")

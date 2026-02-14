@@ -70,6 +70,10 @@ setup:
     - 'command -v cargo >/dev/null || { echo "missing required tool: cargo" >&2; exit 1; }'
     - 'command -v wasm-pack >/dev/null || cargo install wasm-pack'
     - 'rustup target list --installed | grep -qx wasm32-unknown-unknown || rustup target add wasm32-unknown-unknown'
+    # Pre-install wasm-bindgen-cli so wasm-pack finds it already present.
+    # Without this, wasm-pack tries "cargo install wasm-bindgen-cli" at runtime,
+    # which fails inside the codex sandbox (writes to ~/.cargo/bin/ are blocked).
+    - 'cargo install --list | grep -q wasm-bindgen-cli || cargo install wasm-bindgen-cli'
 
 runtime_policy:
   stage_timeout_ms: 0

@@ -893,6 +893,15 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		if err != nil {
 			return "", classifiedFailure(err, ""), nil
 		}
+		// Avoid cross-device link (EXDEV) errors in Rust/cargo builds:
+		// the codex sandbox may treat the workspace and /tmp as different
+		// overlay layers, causing rename() failures when cargo moves
+		// intermediate artifacts into the target directory. Setting
+		// CARGO_TARGET_DIR inside the workspace keeps all cargo I/O on
+		// the same layer. Harmless for non-Rust projects (unused env var).
+		if !envHasKey(isolatedEnv, "CARGO_TARGET_DIR") {
+			isolatedEnv = append(isolatedEnv, "CARGO_TARGET_DIR="+filepath.Join(execCtx.WorktreeDir, ".cargo-target"))
+		}
 	}
 
 	// Metaspec: if a provider CLI supports both an event stream and a structured final JSON output,
@@ -1436,6 +1445,17 @@ func mergeEnvWithOverrides(base []string, overrides map[string]string) []string 
 		out = append(out, k+"="+overrides[k])
 	}
 	return out
+}
+
+// envHasKey returns true if the given key is present in the environment slice.
+func envHasKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // conflictingProviderEnvKeys returns env var names that must be stripped when
