@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +71,106 @@ func TestAttractorRun_DetachedWritesPIDFile(t *testing.T) {
 
 	waitForFile(t, filepath.Join(logs, "final.json"), 20*time.Second)
 	waitForProcessExit(t, pid, 10*time.Second)
+}
+
+func TestAttractorRun_DetachedMode_DeletedLauncherCWDDoesNotAbortRun(t *testing.T) {
+	bin := buildKilroyBinary(t)
+	cxdb := newCXDBTestServer(t)
+	repo := initTestRepo(t)
+	catalog := writePinnedCatalog(t)
+	configAbs := writeRunConfig(t, repo, cxdb.URL(), cxdb.BinaryAddr(), catalog)
+	graphAbs := writeDetachGraph(t)
+	logs := filepath.Join(t.TempDir(), "logs")
+
+	root := t.TempDir()
+	inputsDir := filepath.Join(root, "inputs")
+	if err := os.MkdirAll(inputsDir, 0o755); err != nil {
+		t.Fatalf("mkdir inputs: %v", err)
+	}
+	launcherDir := filepath.Join(root, "launcher")
+	if err := os.MkdirAll(launcherDir, 0o755); err != nil {
+		t.Fatalf("mkdir launcher: %v", err)
+	}
+	graphBytes, err := os.ReadFile(graphAbs)
+	if err != nil {
+		t.Fatalf("read graph: %v", err)
+	}
+	stableGraphPath := filepath.Join(inputsDir, "g.dot")
+	if err := os.WriteFile(stableGraphPath, graphBytes, 0o644); err != nil {
+		t.Fatalf("write graph: %v", err)
+	}
+	configBytes, err := os.ReadFile(configAbs)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	stableConfigPath := filepath.Join(inputsDir, "run.yaml")
+	if err := os.WriteFile(stableConfigPath, configBytes, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	relGraphPath, err := filepath.Rel(launcherDir, stableGraphPath)
+	if err != nil {
+		t.Fatalf("rel graph: %v", err)
+	}
+	relConfigPath, err := filepath.Rel(launcherDir, stableConfigPath)
+	if err != nil {
+		t.Fatalf("rel config: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(launcherDir); err != nil {
+		t.Fatalf("chdir launcher: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	cmd := exec.Command(
+		bin,
+		"attractor", "run",
+		"--detach",
+		"--graph", relGraphPath,
+		"--config", relConfigPath,
+		"--run-id", "detach-deleted-cwd",
+		"--logs-root", logs,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("detached launch failed: %v\n%s", err, out)
+	}
+
+	if err := os.Chdir(oldWD); err != nil {
+		t.Fatalf("restore cwd: %v", err)
+	}
+	if err := os.RemoveAll(launcherDir); err != nil {
+		t.Fatalf("remove launcher dir: %v", err)
+	}
+
+	waitForFile(t, filepath.Join(logs, "run.pid"), 5*time.Second)
+	pid := readPIDFile(t, filepath.Join(logs, "run.pid"))
+	waitForFile(t, filepath.Join(logs, "final.json"), 20*time.Second)
+	waitForProcessExit(t, pid, 10*time.Second)
+
+	runOutBytes, err := os.ReadFile(filepath.Join(logs, "run.out"))
+	if err != nil {
+		t.Fatalf("read run.out: %v", err)
+	}
+	runOut := string(runOutBytes)
+	if strings.Contains(runOut, "tool read_file schema: getwd: no such file or directory") {
+		t.Fatalf("detached run should not fail due to deleted launcher cwd:\n%s", runOut)
+	}
+
+	var final map[string]any
+	finalBytes, err := os.ReadFile(filepath.Join(logs, "final.json"))
+	if err != nil {
+		t.Fatalf("read final.json: %v", err)
+	}
+	if err := json.Unmarshal(finalBytes, &final); err != nil {
+		t.Fatalf("decode final.json: %v", err)
+	}
+	if strings.TrimSpace(anyToString(final["status"])) == "fail" {
+		t.Fatalf("expected detached run to complete successfully; final=%v", final)
+	}
 }
 
 func writeDetachGraph(t *testing.T) string {
