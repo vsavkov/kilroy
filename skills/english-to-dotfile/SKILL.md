@@ -193,19 +193,29 @@ STOP (interactive mode). Do not emit `.dot` until the user replies.
 #### Step 0.9: After Selection, Generate DOT
 
 Once the choice/overrides are known:
-- TEMPLATE-FIRST:
-  - Default to starting from the validated reference template at:
-    - `skills/english-to-dotfile/reference_template.dot`
-  - Treat it as the *structural* starting point (stage ordering + loop semantics), then adapt it to the requirements in this skill:
-    - Keep the hill-climbing loop: DoD (if missing) → plan fan-out (3) → debate/consolidate → **single-writer implement** → review fan-out (3) → consensus → postmortem → loop back to planning.
-    - Keep implementation **single-threaded** (one node touching code at a time). Use parallelism for *thinking* stages (DoD/plan/review), not for code edits.
-    - Do **not** copy legacy/non-spec attributes that appear in some reference dotfiles (`node_type`, `is_codergen`, `context_fidelity_default`, etc.). Keep only Attractor-spec-canonical attrs (`shape`, `prompt`, `class`, `llm_model`, `llm_provider`, `model_stylesheet`, etc.).
-    - If you need any implementation fan-out despite the above, only do it with strict isolation + merge:
-      - disjoint write scopes per branch, shared/core files read-only, and a dedicated post-fan-in integration/merge node.
-  - If the template file is missing/unavailable, fall back to generating the graph from scratch using this spec — but preserve the same "single-writer implement + plan/review/postmortem loop" philosophy unless the user overrides it.
+- There are many valid ways to structure a pipeline. Unless the user asks for a different structure, keep things simple and proven by using the reference profile.
+- We do:
+  - Start from `skills/english-to-dotfile/reference_template.dot`.
+  - Keep the same core flow: DoD (if needed) -> plan fan-out (3) -> consolidate -> single-writer implement -> verify/check -> review fan-out (3) -> consensus -> postmortem -> planning restart.
+  - Keep implementation single-writer. Use parallelism for thinking stages (DoD/plan/review), not for code edits.
+  - Preserve explicit outcome-based routing and restart edges from the template.
+- We do not:
+  - Invent new loop/control-flow mechanisms when the reference flow already fits.
+  - Add visit-count loop breakers by default.
+  - Parallelize implementation unless the user explicitly asks for it and the graph includes clear isolation and merge steps.
+- If the template file is unavailable, generate from scratch using the same reference flow unless the user overrides it.
 - Encode the chosen models via `model_stylesheet` and/or explicit node attrs.
 - If High (or the user requested parallel), implement 3-way parallel planning/review with a fan-out + fan-in + synthesis pattern.
 - Keep the rest of the pipeline generation process unchanged.
+
+#### Reference Looping Profile
+
+For iterative build workflows, keep this structure unless the user asks for a different one:
+- Graph attrs include: `default_max_retry`, `retry_target`, `fallback_retry_target`.
+- Inner repair loop: `implement -> verify -> check -> implement` on fail.
+- Outer improvement loop: `review_consensus -> postmortem -> plan_*` with `loop_restart=true`.
+- Routing stays outcome-based (`outcome=pass|retry|fail|skip|done`).
+- Do not add visit-count loop breakers (for example `max_node_visits`) by default.
 
 ### Phase 1: Requirements Expansion
 
@@ -478,7 +488,6 @@ For build pipelines, no exceptions: every implementation node (including `impl_s
 If you do set `max_agent_turns`:
 - Omitted or `0` = unlimited (timeout-only guard).
 - `N` = hard cap at N turns (one turn = one LLM API call + tool execution). Resets per retry attempt.
-- Base values on observed P95/P99 turn counts, not guesses. Until you have that data, omit it.
 
 #### Goal gates
 
@@ -867,6 +876,7 @@ Common repairs (use validator output; do not guess blindly):
 - Ensure exactly one `start` and one `exit`, with correct `shape` and reachability.
 - Fix missing semicolons / commas / brackets in node/edge attribute lists.
 - Replace edge `label="success"` style routing with proper `condition="outcome=..."`.
+- For looped workflows, verify reference loop structure still exists: inner fail-retry loop, postmortem restart loop, and explicit outcome-based routing.
 
 ## Kilroy DSL Quick Reference
 
@@ -944,7 +954,7 @@ Custom outcome values work: `outcome=port`, `outcome=skip`, `outcome=needs_fix`.
 6. **Inlining the spec.** Reference the spec file by path. Don't copy it into prompt attributes. Exception: `expand_spec` node bootstraps the spec.
 7. **Missing graph attributes.** Always set `goal`, `model_stylesheet`, `default_max_retry`.
 8. **Wrong shapes.** Start must be `Mdiamond`. Exit must be `Msquare`. The validator also accepts nodes with id `start`/`exit` regardless of shape, but always use the canonical shapes.
-9. **Unnecessary timeouts.** Do NOT add timeouts to simple impl/verify nodes in linear pipelines — a single CLI run can legitimately take hours. DO add timeouts to nodes in looping pipelines (to prevent infinite hangs) or nodes calling external services. When adding timeouts, use generous values (`"900"` for normal work, `"1800"` for complex implementation, `"2400"` for integration).
+9. **Unnecessary timeouts.** Do NOT add timeouts to simple impl/verify nodes in linear pipelines — a single CLI run can legitimately take hours. DO add timeouts to nodes in looping pipelines (to prevent infinite hangs) or nodes calling external services. Prefer the reference/template timeout ranges over ad-hoc new values.
 10. **Build files after implementation.** Project setup (module file, directory structure) must be the FIRST implementation node.
 11. **Catastrophic review rollback.** Review failure (`check_review -> impl_X`) must target a LATE node (integration, CLI, or the last major impl). Never loop `check_review` back to `impl_setup` — this throws away all work. Target the last integration or polish node.
 12. **Missing verify class.** Every verify node MUST have `class="verify"` so the model stylesheet applies your intended verify model and thinking.
@@ -986,8 +996,9 @@ Each fan-out branch prompt should include:
 28. **`reasoning_effort` on Cerebras GLM 4.7.** Do NOT set `reasoning_effort` on GLM 4.7 nodes expecting it to control reasoning depth — that parameter only works on Cerebras `gpt-oss-120b`. GLM 4.7 reasoning is always on. The engine automatically sets `clear_thinking: false` for Cerebras agent-loop nodes to preserve reasoning context across turns.
 29. **Parallel code-writing in a shared worktree (default disallowed).** Do NOT run multiple programming/implementation nodes in parallel that touch the same codebase state. If implementation fan-out is required, enforce strict isolation (disjoint write scopes, shared files read-only) and converge via an explicit integration/merge node.
 30. **Generating DOTs from scratch when a validated template exists.** For production-quality runs, start from `skills/english-to-dotfile/reference_template.dot` and make minimal, validated edits. New topologies are allowed, but they are higher-risk and must be validated early/cheap to avoid expensive runaway loops.
-31. **Setting `max_agent_turns` without production data.** Do not guess turn limits. Use `timeout` as the primary safety guard. Add `max_agent_turns` only as a secondary clamp once you have observed turn-count distributions from production runs — a wrong turn limit kills productive work and wastes every turn the agent already completed.
+31. **Ad-hoc turn budgets disconnected from the reference profile.** If you're using the template-first flow, keep the template `max_agent_turns` values by default and only adjust with a clear reason.
 32. **Putting prompts on diamond (conditional) nodes.** Diamond nodes are pure pass-through routers handled by `ConditionalHandler` — they forward the previous node's outcome to edge conditions and never execute prompts. A `prompt` attribute on a diamond node is dead code. If the node needs to run an LLM prompt and write its own outcome, use `shape=box`. The Kilroy validator warns on this (`prompt_on_conditional_node`).
+33. **Defaulting to visit-count loop breakers.** Do not add visit-count controls (for example `max_node_visits`) as the default loop guardrail profile.
 
 ## Notes on Reference Dotfile Conventions
 
