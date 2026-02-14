@@ -45,9 +45,9 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
   - Tune with `KILROY_PREFLIGHT_API_PROMPT_PROBE_TIMEOUT_MS`, `KILROY_PREFLIGHT_API_PROMPT_PROBE_RETRIES`, `KILROY_PREFLIGHT_API_PROMPT_PROBE_BASE_DELAY_MS`, `KILROY_PREFLIGHT_API_PROMPT_PROBE_MAX_DELAY_MS`.
 - Provider plug-ins (runtime metadata):
   - Providers are resolved through runtime metadata (protocol family + backend + failover), not hard-coded provider switches.
-  - Built-ins: `openai`, `anthropic`, `google`, `kimi`, `zai`.
-  - Built-in aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`.
-  - `kimi` and `zai` are API-only in this release (`kimi` uses `anthropic_messages`; `zai` uses `openai_chat_completions`).
+  - Built-ins: `openai`, `anthropic`, `google`, `kimi`, `zai`, `minimax`.
+  - Built-in aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`, `minimax-ai` -> `minimax`.
+  - `kimi`, `zai`, and `minimax` are API-only in this release (`kimi` uses `anthropic_messages`; `zai` and `minimax` use `openai_chat_completions`).
 - Real vs test-shim execution:
   - `llm.cli_profile` defaults to `real` and rejects `KILROY_CODEX_PATH`, `KILROY_CLAUDE_PATH`, `KILROY_GEMINI_PATH` overrides.
   - Test-shim mode requires both `llm.cli_profile: test_shim` and per-provider `executable` config.
@@ -58,7 +58,7 @@ Although bringing your own agentic loop and unified LLM SDK is not required to b
     - `./kilroy attractor run --graph <graph.dot> --config <run.yaml> --allow-test-shim`
   - Optional model override:
     - `--force-model <provider=model>` (repeatable) forces a provider model and bypasses provider/model catalog membership checks for that provider.
-    - Supported canonical providers are `openai`, `anthropic`, `google`, `kimi`, `zai` (aliases accepted and canonicalized).
+    - Supported canonical providers are `openai`, `anthropic`, `google`, `kimi`, `zai`, `minimax` (aliases accepted and canonicalized).
 - Fan-in all-fail behavior:
   - When all parallel branches are `status=fail`, fan-in emits `failure_class` + `failure_signature` on the aggregate fail outcome.
   - Deterministic precedence is fail-closed: any deterministic/unknown branch class makes aggregate deterministic.

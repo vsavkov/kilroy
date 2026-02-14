@@ -38,7 +38,7 @@ This implementation is based on the Attractor specification by StrongDM at `http
 | Graph DSL + engine semantics | DOT schema, handler model, edge selection, retry, conditions, context fidelity | Concrete Go engine implementation details and defaults |
 | Coding-agent loop | Session model, tool loop behavior, provider-aligned tool concepts | Local tool execution wiring and CLI/API backend routing choices |
 | Unified LLM model | Provider-neutral request/response/tool/streaming contracts | Concrete provider adapters and environment wiring |
-| Provider support | Conceptual provider abstraction | Provider plug-in runtime with built-ins: OpenAI, Anthropic, Google, Kimi, ZAI |
+| Provider support | Conceptual provider abstraction | Provider plug-in runtime with built-ins: OpenAI, Anthropic, Google, Kimi, ZAI, Minimax |
 | Backend selection | Spec allows flexible backend choices | Backend is mandatory per provider (`api`/`cli`), no implicit defaults |
 | Checkpointing + persistence | Attractor/CXDB contracts | Required git branch/worktree/commit-per-node and concrete artifact layout |
 | Ingestion | Ingestor behavior described in spec docs | `attractor ingest` implementation: Claude CLI + `english-to-dotfile` skill |
@@ -249,10 +249,10 @@ Observe and intervene during long runs:
 Provider runtime architecture:
 
 - Providers are protocol-driven and configured under `llm.providers.<provider>`.
-- Built-ins include `openai`, `anthropic`, `google`, `kimi`, `zai`, and `cerebras`.
-- Provider aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`, `cerebras-ai` -> `cerebras`.
+- Built-ins include `openai`, `anthropic`, `google`, `kimi`, `zai`, `cerebras`, and `minimax`.
+- Provider aliases: `gemini`/`google_ai_studio` -> `google`, `moonshot`/`moonshotai` -> `kimi`, `z-ai`/`z.ai` -> `zai`, `cerebras-ai` -> `cerebras`, `minimax-ai` -> `minimax`.
 - CLI contracts are built-in for `openai`, `anthropic`, and `google`.
-- `kimi`, `zai`, and `cerebras` are API-only in this release.
+- `kimi`, `zai`, `cerebras`, and `minimax` are API-only in this release.
 - `profile_family` selects agent behavior/tooling profile only; API requests still route by `llm_provider` (native provider key).
 
 CLI backend command mappings:
@@ -275,6 +275,7 @@ API backend environment variables:
 - Kimi (Coding API key): `KIMI_API_KEY`
 - ZAI: `ZAI_API_KEY`
 - Cerebras: `CEREBRAS_API_KEY`
+- Minimax: `MINIMAX_API_KEY` (`MINIMAX_BASE_URL` optional)
 
 API prompt-probe tuning (preflight):
 
@@ -329,7 +330,7 @@ kilroy attractor ingest [--output <file.dot>] [--model <model>] [--skill <skill.
 ```
 
 `--force-model` can be passed multiple times (for example, `--force-model openai=gpt-5.2-codex --force-model google=gemini-3-pro-preview`) to override node model selection by provider.
-Supported providers are `openai`, `anthropic`, `google`, `kimi`, and `zai` (aliases accepted).
+Supported providers are `openai`, `anthropic`, `google`, `kimi`, `zai`, and `minimax` (aliases accepted).
 
 Additional ingest flags:
 
