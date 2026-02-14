@@ -444,7 +444,7 @@ func (h *ToolHandler) Execute(ctx context.Context, execCtx *Execution, node *mod
 		"command":     cmdStr,
 		"working_dir": execCtx.WorktreeDir,
 		"timeout_ms":  timeout.Milliseconds(),
-		"env_mode":    "inherit",
+		"env_mode":    "base",
 	}); err != nil {
 		warnEngine(execCtx, fmt.Sprintf("write tool_invocation.json: %v", err))
 	}
@@ -453,6 +453,7 @@ func (h *ToolHandler) Execute(ctx context.Context, execCtx *Execution, node *mod
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "bash", "-c", cmdStr)
 	cmd.Dir = execCtx.WorktreeDir
+	cmd.Env = buildBaseNodeEnv(execCtx.WorktreeDir)
 	// Avoid hanging on interactive reads; tool_command doesn't provide a way to supply stdin.
 	cmd.Stdin = strings.NewReader("")
 	stdoutPath := filepath.Join(stageDir, "stdout.log")
