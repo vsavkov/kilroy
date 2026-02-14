@@ -296,6 +296,7 @@ MODELS = [
     -- ==========================================================
 
     ModelInfo(id="gpt-5.3-codex",                 provider="openai",    display_name="GPT-5.3 Codex",     context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
+    ModelInfo(id="gpt-5.3-codex-spark",           provider="openai",    display_name="GPT-5.3 Codex Spark", context_window=128000,  supports_tools=true, supports_vision=false, supports_reasoning=true),
     ModelInfo(id="gpt-5.2",                       provider="openai",    display_name="GPT-5.2",           context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
     ModelInfo(id="gpt-5.2-codex",                 provider="openai",    display_name="GPT-5.2 Codex",     context_window=1047576, supports_tools=true, supports_vision=true, supports_reasoning=true),
 
