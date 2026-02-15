@@ -663,6 +663,27 @@ func TestMaxNodeVisits_DefaultWhenMissing(t *testing.T) {
 	if got := maxNodeVisits(nil); got != defaultMaxNodeVisits {
 		t.Fatalf("maxNodeVisits nil: got %d want %d", got, defaultMaxNodeVisits)
 	}
+	if defaultMaxNodeVisits != 0 {
+		t.Fatalf("defaultMaxNodeVisits = %d, want 0 (disabled by default)", defaultMaxNodeVisits)
+	}
+}
+
+func TestMaxNodeVisits_DisabledForZeroOrInvalidValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		attr string
+	}{
+		{name: "explicit zero", attr: "0"},
+		{name: "negative", attr: "-5"},
+		{name: "invalid", attr: "banana"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := &model.Graph{Attrs: map[string]string{"max_node_visits": tc.attr}}
+			if got := maxNodeVisits(g); got != 0 {
+				t.Fatalf("maxNodeVisits(%q): got %d want 0", tc.attr, got)
+			}
+		})
+	}
 }
 
 func readProgressEvents(t *testing.T, path string) []map[string]any {

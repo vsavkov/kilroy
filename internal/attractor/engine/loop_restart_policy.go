@@ -17,7 +17,8 @@ const (
 	failureClassCompilationLoop      = "compilation_loop"
 	failureClassStructural           = "structural"
 	defaultLoopRestartSignatureLimit = 3
-	defaultMaxNodeVisits             = 20
+	// 0 disables visit-count cycle breaking unless max_node_visits is explicitly set.
+	defaultMaxNodeVisits = 0
 )
 
 var (

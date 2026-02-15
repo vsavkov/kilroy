@@ -69,10 +69,11 @@ func runSubgraphUntil(ctx context.Context, eng *Engine, startNodeID, stopNodeID 
 			return parallelBranchResult{}, fmt.Errorf("missing node: %s", current)
 		}
 
-		// Stuck-cycle detection (mirrors runLoop). Halt when any node
-		// reaches max_node_visits within this subgraph execution.
+		// Stuck-cycle detection (mirrors runLoop). Halt when max_node_visits
+		// is set (>0) and any node reaches that limit within this subgraph
+		// execution.
 		nodeVisits[current]++
-		if nodeVisits[current] >= visitLimit {
+		if visitLimit > 0 && nodeVisits[current] >= visitLimit {
 			reason := fmt.Sprintf(
 				"subgraph aborted: node %q visited %d times (limit %d); pipeline is stuck in a cycle",
 				current, nodeVisits[current], visitLimit,

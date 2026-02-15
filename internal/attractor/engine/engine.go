@@ -443,13 +443,13 @@ func (e *Engine) runLoop(ctx context.Context, current string, completed []string
 		}
 
 		// Stuck-cycle detection: count how many times each node has been
-		// visited in this iteration. When a node reaches max_node_visits
-		// (default 20), halt — the pipeline is stuck in a retry loop
-		// (e.g., implement succeeds but verify always fails due to
+		// visited in this iteration. When max_node_visits is set (>0) and a
+		// node reaches that limit, halt — the pipeline is stuck in a retry
+		// loop (e.g., implement succeeds but verify always fails due to
 		// environment issues). This catches cycles that the signature-based
 		// circuit breaker misses because the AI writes varying error messages.
 		nodeVisits[current]++
-		if nodeVisits[current] >= visitLimit {
+		if visitLimit > 0 && nodeVisits[current] >= visitLimit {
 			reason := fmt.Sprintf(
 				"run aborted: node %q visited %d times in this iteration (limit %d); pipeline is stuck in a cycle",
 				current, nodeVisits[current], visitLimit,
