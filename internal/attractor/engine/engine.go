@@ -64,6 +64,20 @@ type RunOptions struct {
 	// Optional cap for LLM retries in codergen routing.
 	// Pointer preserves explicit zero versus unset semantics from config.
 	MaxLLMRetries *int
+
+	// Optional callback invoked for every progress event (same data written to
+	// progress.ndjson). The map is a deep-copied snapshot safe for concurrent
+	// use by the caller. Used by the HTTP server to fan events to SSE clients.
+	ProgressSink func(map[string]any)
+
+	// Optional interviewer for human-in-the-loop gates. Defaults to
+	// AutoApproveInterviewer when nil.
+	Interviewer Interviewer
+
+	// Optional callback invoked after the engine is fully initialized but
+	// before the main loop starts. Allows callers to capture an engine
+	// reference for context inspection, etc.
+	OnEngineReady func(e *Engine)
 }
 
 func (o *RunOptions) applyDefaults() error {

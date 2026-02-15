@@ -85,6 +85,9 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 	}
 	opts.AllowTestShim = overrides.AllowTestShim
 	opts.ForceModels = normalizeForceModels(overrides.ForceModels)
+	opts.ProgressSink = overrides.ProgressSink
+	opts.Interviewer = overrides.Interviewer
+	opts.OnEngineReady = overrides.OnEngineReady
 
 	if err := opts.applyDefaults(); err != nil {
 		return nil, err
@@ -222,6 +225,10 @@ func RunWithConfig(ctx context.Context, dotSource []byte, cfg *RunConfigFile, ov
 		for _, w := range startup.Warnings {
 			eng.Warn(w)
 		}
+	}
+
+	if overrides.OnEngineReady != nil {
+		overrides.OnEngineReady(eng)
 	}
 
 	res, err := eng.run(ctx)

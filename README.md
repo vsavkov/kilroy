@@ -361,6 +361,7 @@ kilroy attractor status --logs-root <dir> [--json]
 kilroy attractor stop --logs-root <dir> [--grace-ms <ms>] [--force]
 kilroy attractor validate --graph <file.dot>
 kilroy attractor ingest [--output <file.dot>] [--model <model>] [--skill <skill.md>] <requirements>
+kilroy attractor serve [--addr <host:port>]
 ```
 
 `--force-model` can be passed multiple times (for example, `--force-model openai=gpt-5.2-codex --force-model google=gemini-3-pro-preview`) to override node model selection by provider.
@@ -375,6 +376,32 @@ Exit codes:
 
 - `0`: run/resume finished with final status `success`, or validate succeeded
 - `1`: command failed, validation error, or final status was not `success`
+
+## HTTP Server Mode (Experimental)
+
+**This feature is experimental and subject to breaking changes.**
+
+`kilroy attractor serve` starts an HTTP server that exposes pipeline management via a REST API with Server-Sent Events (SSE) for real-time progress streaming. This enables remote pipeline submission, live observability dashboards, and web-based human-in-the-loop gates.
+
+```bash
+kilroy attractor serve                    # listens on 127.0.0.1:8080
+kilroy attractor serve --addr :9090       # custom address
+```
+
+Endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Server health and pipeline count |
+| `POST` | `/pipelines` | Submit a pipeline run |
+| `GET` | `/pipelines/{id}` | Pipeline status |
+| `GET` | `/pipelines/{id}/events` | SSE event stream |
+| `POST` | `/pipelines/{id}/cancel` | Cancel a running pipeline |
+| `GET` | `/pipelines/{id}/context` | Engine runtime context |
+| `GET` | `/pipelines/{id}/questions` | Pending human-gate questions |
+| `POST` | `/pipelines/{id}/questions/{qid}/answer` | Answer a question |
+
+The server defaults to localhost-only binding and includes CSRF protection. There is no authentication — do not expose to untrusted networks.
 
 ## Skills Included In This Repo
 

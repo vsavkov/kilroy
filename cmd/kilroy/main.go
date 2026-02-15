@@ -75,6 +75,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  kilroy attractor stop --logs-root <dir> [--grace-ms <ms>] [--force]")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor validate --graph <file.dot>")
 	fmt.Fprintln(os.Stderr, "  kilroy attractor ingest [--output <file.dot>] [--model <model>] [--skill <skill.md>] [--repo <path>] [--max-turns <n>] <requirements>")
+	fmt.Fprintln(os.Stderr, "  kilroy attractor serve [--addr <host:port>]")
 }
 
 func attractor(args []string) {
@@ -95,6 +96,8 @@ func attractor(args []string) {
 		attractorValidate(args[1:])
 	case "ingest":
 		attractorIngest(args[1:])
+	case "serve":
+		attractorServe(args[1:])
 	default:
 		usage()
 		os.Exit(1)

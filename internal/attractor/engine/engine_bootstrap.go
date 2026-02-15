@@ -16,6 +16,12 @@ func newBaseEngine(g *model.Graph, dotSource []byte, opts RunOptions) *Engine {
 		Registry:    NewDefaultRegistry(),
 		Interviewer: &AutoApproveInterviewer{},
 	}
+	if opts.ProgressSink != nil {
+		e.progressSink = opts.ProgressSink
+	}
+	if opts.Interviewer != nil {
+		e.Interviewer = opts.Interviewer
+	}
 	e.RunBranch = buildRunBranch(opts.RunBranchPrefix, opts.RunID)
 	return e
 }
