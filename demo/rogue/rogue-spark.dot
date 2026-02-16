@@ -72,14 +72,37 @@ digraph rogue_spark {
     ]
 
     // =========================================================================
-    // Verify implementation
+    // Verify/check inner loop — deterministic tool gates first, then fidelity
     // =========================================================================
-    verify_impl [
+    verify_fmt [
+        shape=parallelogram,
+        tool_command="bash -lc 'set -euo pipefail; cd demo/rogue/rogue-wasm && cargo fmt --all -- --check'"
+    ]
+    check_fmt [shape=diamond, label="Fmt OK?"]
+
+    verify_build [
+        shape=parallelogram,
+        tool_command="bash -lc 'set -euo pipefail; cd demo/rogue/rogue-wasm && cargo build --target wasm32-unknown-unknown'"
+    ]
+    check_build [shape=diamond, label="Build OK?"]
+
+    verify_test [
+        shape=parallelogram,
+        tool_command="bash -lc 'set -euo pipefail; cd demo/rogue/rogue-wasm && cargo test && wasm-pack build --target web'"
+    ]
+    check_test [shape=diamond, label="Tests/WASM OK?"]
+
+    verify_artifacts [
+        shape=parallelogram,
+        tool_command="bash -lc 'set -euo pipefail; paths=$(git diff --name-only $base_sha -- || true); bad=$(printf \"%s\\n\" \"$paths\" | rg -n \"(^|/)(target|dist|build|pkg|node_modules|\\.cargo-target|\\.cargo_target)($|/)\" || true); test -f demo/rogue/rogue-wasm/www/index.html; if [ -n \"$bad\" ]; then echo \"artifact_pollution\" >&2; echo \"$bad\" >&2; exit 1; fi'"
+    ]
+    check_artifacts [shape=diamond, label="Artifacts OK?"]
+
+    verify_fidelity [
         shape=box,
         class="verify",
-        prompt="Verify the Rogue WASM port implementation.\n\nRun these checks in order:\n\n1. Structural integrity — verify key files exist:\n   - demo/rogue/rogue-wasm/Cargo.toml\n   - demo/rogue/rogue-wasm/src/lib.rs\n   - demo/rogue/rogue-wasm/www/index.html\n\n2. Formatting check:\n   cd demo/rogue/rogue-wasm && cargo fmt --all -- --check\n\n3. Build check:\n   cd demo/rogue/rogue-wasm && cargo build --target wasm32-unknown-unknown\n\n4. Lint check (scoped to project):\n   cd demo/rogue/rogue-wasm && cargo clippy --target wasm32-unknown-unknown -- -D warnings 2>&1 || true\n\n5. Unit tests (native target):\n   cd demo/rogue/rogue-wasm && cargo test\n\n6. WASM pack build:\n   cd demo/rogue/rogue-wasm && wasm-pack build --target web\n\n7. Artifact hygiene: check that git diff vs $base_sha does not include target/, pkg/ (build outputs), or other artifact directories in tracked files.\n\n8. Fidelity spot-check: compare at least 3 key algorithms against the original C source at demo/rogue/original-rogue/:\n   - RNG seed/generation formula\n   - Room placement algorithm\n   - Combat attack roll formula\n   Note any deviations.\n\nWrite detailed results to .ai/verify_impl.md.\n\nWrite status JSON to $KILROY_STAGE_STATUS_PATH (absolute path), fallback to $KILROY_STAGE_STATUS_FALLBACK_PATH, and do not write nested status.json files.\nWrite status JSON: outcome=success if steps 1-6 all pass, outcome=fail with failure_reason and details otherwise."
+        prompt="Perform semantic fidelity review after deterministic tooling gates pass.\n\nRead:\n- .ai/definition_of_done.md\n- .ai/spec.md\n- .ai/implementation_log.md\n- The implementation under demo/rogue/rogue-wasm/\n- The original C source at demo/rogue/original-rogue/\n\nConfirm algorithmic fidelity (RNG, dungeon generation, monster stats, combat math), gameplay completeness, and browser playability.\n\nWrite results to .ai/verify_fidelity.md.\n\nWrite status JSON to $KILROY_STAGE_STATUS_PATH (absolute path), fallback to $KILROY_STAGE_STATUS_FALLBACK_PATH, and do not write nested status.json files.\nWrite status JSON: outcome=success if fidelity checks pass, outcome=fail with failure_reason and details."
     ]
-
     check_impl [shape=diamond, label="Impl OK?"]
 
     // =========================================================================
@@ -115,9 +138,30 @@ digraph rogue_spark {
 
     // Plan -> implement -> verify inner loop
     plan -> implement
-    implement -> verify_impl -> check_impl
-    check_impl -> review       [condition="outcome=success"]
-    check_impl -> implement    [condition="outcome=fail", label="retry"]
+    implement -> verify_fmt -> check_fmt
+    check_fmt -> verify_build [condition="outcome=success"]
+    check_fmt -> implement    [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
+    check_fmt -> postmortem   [condition="outcome=fail && context.failure_class!=transient_infra"]
+
+    verify_build -> check_build
+    check_build -> verify_test [condition="outcome=success"]
+    check_build -> implement   [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
+    check_build -> postmortem  [condition="outcome=fail && context.failure_class!=transient_infra"]
+
+    verify_test -> check_test
+    check_test -> verify_artifacts [condition="outcome=success"]
+    check_test -> implement        [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
+    check_test -> postmortem       [condition="outcome=fail && context.failure_class!=transient_infra"]
+
+    verify_artifacts -> check_artifacts
+    check_artifacts -> verify_fidelity [condition="outcome=success"]
+    check_artifacts -> implement       [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
+    check_artifacts -> postmortem      [condition="outcome=fail && context.failure_class!=transient_infra"]
+
+    verify_fidelity -> check_impl
+    check_impl -> review [condition="outcome=success"]
+    check_impl -> postmortem [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
+    check_impl -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
 
     // Review routing
     review -> exit             [condition="outcome=success"]
