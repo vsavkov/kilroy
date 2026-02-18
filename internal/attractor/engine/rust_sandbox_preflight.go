@@ -194,7 +194,7 @@ func runRustSandboxPreflightForManifest(ctx context.Context, manifestPath, workt
 		return checkMeta, nil
 	}
 
-	targetDir := strings.TrimSpace(envLookup(env, "CARGO_TARGET_DIR"))
+	targetDir := strings.TrimSpace(envListLookup(env, "CARGO_TARGET_DIR"))
 	if targetDir == "" {
 		targetDir = filepath.Join(filepath.Dir(manifestPath), "target")
 	}
@@ -211,7 +211,9 @@ func runRustSandboxPreflightForManifest(ctx context.Context, manifestPath, workt
 		)
 	}
 
-	tmpFile, err := os.CreateTemp("", "kilroy-rust-preflight-*")
+	// Create the probe temp file under targetDir so the probe validates
+	// destination filesystem writability without introducing a cross-FS move.
+	tmpFile, err := os.CreateTemp(targetDir, ".kilroy-rust-preflight-src-*")
 	if err != nil {
 		checkMeta["check"] = "rename_probe"
 		checkMeta["error"] = err.Error()
@@ -296,4 +298,14 @@ func sortedStringSetKeys(set map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func envListLookup(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
 }
