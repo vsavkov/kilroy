@@ -120,11 +120,12 @@ digraph G {
 	}
 }
 
-// TestRun_BoxNodeCustomOutcome_NoMatchingEdge_Errors verifies that when a box
-// node returns a custom outcome that does NOT match any outgoing edge condition,
-// and no unconditional fallback edge exists, the engine treats this as a routing
-// gap and errors. The user should add an unconditional edge for unmatched outcomes.
-func TestRun_BoxNodeCustomOutcome_NoMatchingEdge_Errors(t *testing.T) {
+// TestRun_BoxNodeCustomOutcome_NoMatchingEdge_FallsBackToAnyEdge verifies that
+// when a box node returns a custom outcome that does NOT match any outgoing edge
+// condition and no unconditional edge exists, the engine falls back to ALL edges
+// per spec §3.3 ("Fallback: any edge"). Both dod_gen and plan are eligible via
+// fallback fan-out, and the pipeline completes.
+func TestRun_BoxNodeCustomOutcome_NoMatchingEdge_FallsBackToAnyEdge(t *testing.T) {
 	cleanupStrayEngineArtifacts(t)
 	t.Cleanup(func() { cleanupStrayEngineArtifacts(t) })
 
@@ -159,7 +160,8 @@ echo '{"type":"done","text":"ok"}'
 	cfg.Git.RunBranchPrefix = "attractor/run"
 
 	// The box node returns "unknown_value" but edges only match "needs_dod" and "has_dod".
-	// No unconditional edge exists — this is a routing gap.
+	// No unconditional edge exists. Spec §3.3 fallback: all edges are eligible,
+	// resulting in implicit fan-out to both dod_gen and plan.
 	dot := []byte(`
 digraph G {
   graph [goal="test unmatched custom outcome", default_max_retry=0]
@@ -181,15 +183,13 @@ digraph G {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	res, err := RunWithConfig(ctx, dot, cfg, RunOptions{RunID: "custom-outcome-nomatch", LogsRoot: logsRoot, AllowTestShim: true})
+	if err != nil {
+		t.Fatalf("RunWithConfig: %v", err)
+	}
 
-	// Routing gap: no condition matched "unknown_value", no unconditional edge.
-	// Engine must return a non-nil error (not just a non-success FinalStatus).
-	if err == nil {
-		status := ""
-		if res != nil {
-			status = string(res.FinalStatus)
-		}
-		t.Fatalf("expected error from routing gap (no matching edge for unknown_value outcome), got nil error with status %q", status)
+	// Fallback fan-out: pipeline completes via both dod_gen and plan -> exit.
+	if res.FinalStatus != runtime.FinalSuccess {
+		t.Fatalf("final status: got %q want %q (fallback fan-out should succeed)", res.FinalStatus, runtime.FinalSuccess)
 	}
 }
 

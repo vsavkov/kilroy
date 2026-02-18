@@ -267,9 +267,9 @@ digraph G {
 
 // --- V3.2: No eligible edge when all conditions fail (no fallback) ---
 
-func TestSelectAllEligibleEdges_NoEligibleEdge_AllConditionsFailed(t *testing.T) {
-	// When all edges have conditions and none match, return nil (routing gap).
-	// The user should add an unconditional fallback edge.
+func TestSelectAllEligibleEdges_FallbackAnyEdge_AllConditionsFailed(t *testing.T) {
+	// Spec §3.3 fallback: when all edges have conditions and none match,
+	// return ALL edges so the caller can apply weight-then-lexical tiebreaking.
 	g, err := dot.Parse([]byte(`
 digraph G {
   graph [goal="test"]
@@ -295,15 +295,15 @@ digraph G {
 	if err != nil {
 		t.Fatalf("selectAllEligibleEdges: %v", err)
 	}
-	// No fallback — routing gap returns nil.
-	if edges != nil {
-		t.Fatalf("got %d edges, want nil (no eligible edge — routing gap)", len(edges))
+	// Fallback: all edges returned (spec §3.3 "Fallback: any edge").
+	if len(edges) != 2 {
+		t.Fatalf("got %d edges, want 2 (fallback returns all edges)", len(edges))
 	}
 }
 
-func TestSelectNextEdge_NoEligibleEdge_ReturnsNil(t *testing.T) {
-	// When all conditions fail and no unconditional edge exists, selectNextEdge
-	// returns nil — the graph has a routing gap.
+func TestSelectNextEdge_FallbackAnyEdge_PicksBestByWeightThenLexical(t *testing.T) {
+	// Spec §3.3 fallback: when all conditions fail and no unconditional edge exists,
+	// selectNextEdge picks the best edge by weight-then-lexical from ALL edges.
 	g, err := dot.Parse([]byte(`
 digraph G {
   start [shape=Mdiamond]
@@ -322,14 +322,18 @@ digraph G {
 		t.Fatalf("parse: %v", err)
 	}
 	// partial_success matches neither condition. No unconditional edge exists.
+	// Fallback selects best by weight: c (weight=10) beats b (weight=5).
 	out := runtime.Outcome{Status: runtime.StatusPartialSuccess}
 	ctx := runtime.NewContext()
 	e, err := selectNextEdge(g, "a", out, ctx)
 	if err != nil {
 		t.Fatalf("selectNextEdge: %v", err)
 	}
-	if e != nil {
-		t.Fatalf("expected nil edge (routing gap), got to=%s", e.To)
+	if e == nil {
+		t.Fatalf("expected fallback edge, got nil")
+	}
+	if e.To != "c" {
+		t.Fatalf("expected fallback edge to=c (highest weight), got to=%s", e.To)
 	}
 }
 

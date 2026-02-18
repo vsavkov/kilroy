@@ -116,8 +116,12 @@ func validateCLIOnlyModels(g *model.Graph, runtimes map[string]ProviderRuntime, 
 	if g == nil {
 		return nil
 	}
+	reg := NewDefaultRegistry()
 	for _, n := range g.Nodes {
-		if n == nil || n.Shape() != "box" {
+		if n == nil {
+			continue
+		}
+		if pr, ok := reg.Resolve(n).(ProviderRequiringHandler); !ok || !pr.RequiresProvider() {
 			continue
 		}
 		provider := normalizeProviderKey(n.Attr("llm_provider", ""))
@@ -1195,8 +1199,12 @@ func usedProvidersForBackend(g *model.Graph, runtimes map[string]ProviderRuntime
 	if g == nil {
 		return nil
 	}
+	reg := NewDefaultRegistry()
 	for _, n := range g.Nodes {
-		if n == nil || n.Shape() != "box" {
+		if n == nil {
+			continue
+		}
+		if pr, ok := reg.Resolve(n).(ProviderRequiringHandler); !ok || !pr.RequiresProvider() {
 			continue
 		}
 		provider := normalizeProviderKey(n.Attr("llm_provider", ""))
@@ -1234,10 +1242,14 @@ func usedAPIPromptProbeTargetsForProvider(g *model.Graph, runtimes map[string]Pr
 		transports = []string{preflightAPIPromptProbeTransportComplete}
 	}
 
+	reg := NewDefaultRegistry()
 	seen := map[string]bool{}
 	targets := []preflightAPIPromptProbeTarget{}
 	for _, n := range g.Nodes {
-		if n == nil || n.Shape() != "box" {
+		if n == nil {
+			continue
+		}
+		if pr, ok := reg.Resolve(n).(ProviderRequiringHandler); !ok || !pr.RequiresProvider() {
 			continue
 		}
 		nodeProvider := normalizeProviderKey(n.Attr("llm_provider", ""))
@@ -1411,10 +1423,14 @@ func usedModelsForProviderBackend(g *model.Graph, runtimes map[string]ProviderRu
 	if forcedModel, forced := forceModelForProvider(opts.ForceModels, provider); forced {
 		return []string{forcedModel}
 	}
+	reg := NewDefaultRegistry()
 	seen := map[string]bool{}
 	models := []string{}
 	for _, n := range g.Nodes {
-		if n == nil || n.Shape() != "box" {
+		if n == nil {
+			continue
+		}
+		if pr, ok := reg.Resolve(n).(ProviderRequiringHandler); !ok || !pr.RequiresProvider() {
 			continue
 		}
 		nodeProvider := normalizeProviderKey(n.Attr("llm_provider", ""))

@@ -53,11 +53,12 @@ digraph G {
 	}
 }
 
-// TestRun_NoMatchingFailEdge_NoRetryTarget_Errors verifies that when a node
-// fails and no condition matches (only a "success" edge exists) and there is no
-// retry_target, the engine returns an error. The graph has a routing gap — the
-// user should add an unconditional fallback edge or a fail-matching edge.
-func TestRun_NoMatchingFailEdge_NoRetryTarget_Errors(t *testing.T) {
+// TestRun_NoMatchingFailEdge_NoRetryTarget_FallsBackToAnyEdge verifies that
+// when a node fails and no condition matches (only a "success" edge exists)
+// and there is no retry_target, the engine falls back to ALL edges per spec §3.3
+// ("Fallback: any edge"). The single edge (condition="outcome=yes") is selected
+// as fallback, routing the pipeline to exit.
+func TestRun_NoMatchingFailEdge_NoRetryTarget_FallsBackToAnyEdge(t *testing.T) {
 	repo := t.TempDir()
 	runCmd(t, repo, "git", "init")
 	runCmd(t, repo, "git", "config", "user.name", "tester")
@@ -67,8 +68,8 @@ func TestRun_NoMatchingFailEdge_NoRetryTarget_Errors(t *testing.T) {
 	runCmd(t, repo, "git", "commit", "-m", "init")
 
 	// No retry_target, no matching edge. The only edge has condition="outcome=yes"
-	// but the node fails. This is a routing gap — the engine should error, not
-	// silently route through a condition-failed edge.
+	// but the node fails. Spec §3.3 fallback: the engine selects the only edge
+	// (condition="outcome=yes") as fallback, routing to exit.
 	dot := []byte(`
 digraph G {
   graph [goal="test", default_max_retry=0]
@@ -85,13 +86,11 @@ digraph G {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := Run(ctx, dot, RunOptions{RepoPath: repo})
-	// Routing gap: no eligible edge for the fail outcome. Engine must return
-	// a non-nil error (not just a non-success FinalStatus).
-	if err == nil {
-		status := ""
-		if res != nil {
-			status = string(res.FinalStatus)
-		}
-		t.Fatalf("expected error from routing gap (no matching edge for fail outcome), got nil error with status %q", status)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Fallback routing: pipeline reaches exit via the only available edge.
+	if res.FinalStatus != runtime.FinalSuccess {
+		t.Fatalf("final status: got %q want %q (fallback should route to exit)", res.FinalStatus, runtime.FinalSuccess)
 	}
 }

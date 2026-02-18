@@ -1,9 +1,10 @@
 # Attractor Spec Compliance Audit
 
-**Date:** 2026-02-14
+**Date:** 2026-02-14 (last updated 2026-02-18)
 **Spec:** `docs/strongdm/attractor/attractor-spec.md`
-**Codebase:** Kilroy `main` @ `c9328db6`
+**Codebase:** Kilroy `main`
 **Sections Audited:** 1-11 (Complete)
+**Status:** All 53 violations resolved
 
 ---
 
@@ -60,6 +61,7 @@ The engine's three call sites now type-assert the resolved handler against these
 - `internal/attractor/engine/handlers.go` -- Define three optional capability interfaces (`FidelityAwareHandler`, `SingleExecutionHandler`, `ProviderRequiringHandler`); implement them on `CodergenHandler` and `ConditionalHandler`.
 - `internal/attractor/engine/engine.go` -- Replace two `resolvedHandlerType()` string comparisons with interface type assertions on the resolved handler.
 - `internal/attractor/engine/run_with_config.go` -- Replace two `n.Shape() != "box"` checks with registry-based `ProviderRequiringHandler` type assertions.
+- `internal/attractor/engine/provider_preflight.go` -- Replace four residual `n.Shape() != "box"` checks (`validateCLIOnlyModels`, `usedProvidersForBackend`, `usedAPIPromptProbeTargetsForProvider`, `usedModelsForProviderBackend`) with `ProviderRequiringHandler` type assertions via local `NewDefaultRegistry()`.
 
 **Status: FIXED**
 
@@ -1341,46 +1343,33 @@ Completely different enum names. §11.8 includes `MULTI_SELECT` (not in §6.2); 
 
 ---
 
-## Cross-Cutting Themes
+## Cross-Cutting Themes (Retrospective)
 
-### Intentional Deviations
-Several violations appear to be deliberate design choices documented in code comments:
-- **V3.1** (jitter off) — comment says "for determinism"
-- **V4.5** (conditional pass-through) — comment says "conditional pass-through" design
-- **V3.6** (failure classification) — sophisticated retry policy that goes beyond spec (previously V3.8)
+All 53 violations have been resolved. The themes below summarize the patterns found during the audit and how each category was addressed.
 
-### RETRY vs FAIL Confusion (V4.3, V4.9)
-Both codergen backend errors and handler Go errors produce RETRY where the spec says FAIL. This shifts error handling toward automatic retry, which may be pragmatically correct for transient LLM failures but contradicts the spec's explicit error categorization.
+### Fix Strategy: Code vs Spec
+Of the 53 violations, roughly half were fixed by changing code to match the spec, and the other half by updating the spec to match the code's (superior) approach. Key spec-updates-to-match-code: V4.2 (human gate stores node ID not accelerator key), V4.5 (conditional pass-through), V4.8 (fan-in sort order), V7.1 (diagnostic edge fields), V8.1/V8.2 (shape selector), V9.1 (transform mutation semantics), V10.1/V10.2 (condition language ergonomic extensions).
 
-### Unimplemented Features (V6.6)
-RecordingInterviewer is still unimplemented. Previously deferred items V4.6 (ParallelHandler join/error policies), V4.7 (ManagerLoopHandler), V5.4 (ArtifactStore), V9.2 (observability events), and V9.3 (tool hooks) have all been implemented.
+### RETRY vs FAIL Semantics (V3.6, V4.3, V4.9)
+The codebase had a systematic inversion where handlers returned RETRY for all errors, relying on failure classification to gate retries. Fixed at the source: CodergenHandler now uses `classifyAPIError` to set correct status, Go error conversion defaults to FAIL, and the spec documents failure classification as an official safety net.
 
-### Unicode Permissiveness (V2.1, V8.3)
-Both the DOT lexer and stylesheet parser use `unicode.IsLetter`/`unicode.IsDigit` where the spec requires ASCII-only patterns. Consistent deviation, likely from Go's idiomatic use of `unicode` helpers.
+### Handler Abstraction (V1.1)
+The engine leaked handler-type knowledge via string comparisons (`resolvedHandlerType() == "codergen"`) and shape checks (`n.Shape() != "box"`). Replaced with three optional capability interfaces (`FidelityAwareHandler`, `SingleExecutionHandler`, `ProviderRequiringHandler`) using Go's idiomatic type assertion pattern across `engine.go`, `run_with_config.go`, and `provider_preflight.go`.
 
-### Interviewer Pattern Gaps (V6.1–V6.8)
-The human-in-the-loop subsystem has the most violations of any section. The Interviewer interface is minimal (one method vs three), the Question/Answer structs are missing fields, and the timeout-with-default flow is completely absent. This suggests the interviewer pattern was implemented as a minimal viable version.
+### Edge Selection (V3.2, V3.3, V3.4)
+The edge selection algorithm had three gaps: missing fallback step (V3.2), preferred label only checking unconditional edges (V3.3), and suggested-next-IDs only checking unconditional edges (V3.4). All fixed to match the spec's §3.3 five-step-plus-fallback algorithm. V3.2's fallback has a documented safety concern (can route through condition-failed edges).
 
-### Extra Validation Rules (V7.7)
-The validator includes 8 rules not in the spec, some at ERROR severity. These extend beyond the spec rather than violating it, but can reject spec-valid pipelines.
-
-### Shallow Clone Risk (V5.3)
-Context.Clone() does a shallow copy where the spec requires deep copy. Combined with parallel execution, this is a correctness hazard for any pipeline that stores nested data structures in context.
-
-### Observability Gaps (V9.2, V9.4) -- RESOLVED
-All 9 missing spec-defined typed events have been added to the CXDB registry (V9.2 FIXED). The CheckpointSaved event now includes the required `node_id` field (V9.4 FIXED).
-
-### Condition Language Ergonomic Extensions (V10.1, V10.2) -- RESOLVED
-The condition evaluator adds alias resolution (`ok`→`success`, `failure`→`fail`, `skip`→`skipped`) and extended falsy values (`"false"`, `"0"`, `"no"`). The spec has been updated to document these as official features: §10.3 now includes an alias canonicalization table, §10.4 shows canonicalization in `resolve_key`, §10.5 replaces `bool()` with explicit extended falsy coercion rules, and §10.6 includes examples. These are now portable by definition -- any compliant implementation must support them.
+### Interviewer Pattern (V6.1–V6.8)
+The human-in-the-loop subsystem had the most violations (8). The Interviewer interface was expanded from 1 to 3 methods, Question/Answer structs gained spec-required fields, all 5 concrete implementations were completed (including the previously missing RecordingInterviewer), and console timeout support was added.
 
 ### Spec-Internal Contradictions (V11.1–V11.4)
-Section 11 (Definition of Done) contradicts earlier normative sections in 4 places: retry-on-FAIL semantics (§11.5 vs §3.5), exit node cardinality (§11.2 vs §7.2), QuestionType enum names (§11.8 vs §6.2), and conditional handler behavior (§11.6 vs §4.7). The code sides with §11 in 3 of 4 cases.
+Section 11 (Definition of Done) contradicted earlier normative sections in 4 places. All resolved by updating both sections to agree, with code as the tie-breaker in 3 of 4 cases.
 
 ---
 
-## Deferred Implementation Plans
+## Previously Deferred Features (Now Implemented)
 
-These violations represent unimplemented features that require significant new code (not bug fixes or spec updates). Each has a phased implementation plan.
+These violations were initially deferred as significant new features. Both have since been fully implemented.
 
 ### V4.6 — ParallelHandler join_policy / error_policy -- IMPLEMENTED
 

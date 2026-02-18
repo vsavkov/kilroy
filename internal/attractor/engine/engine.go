@@ -1867,13 +1867,10 @@ func selectAllEligibleEdges(g *model.Graph, from string, out runtime.Outcome, ct
 		return uncond, nil
 	}
 
-	// No eligible edges: all edges have conditions and none matched, and no
-	// unconditional fallback edge exists. Return nil — the caller will treat
-	// this as a routing gap (the graph needs an unconditional edge or more
-	// complete condition coverage). This is safer than silently routing through
-	// condition-failed edges, which can cause surprising behavior (e.g., a
-	// failed node's output routed through a "success-only" edge).
-	return nil, nil
+	// Fallback: any edge (spec §3.3). All edges have conditions and none
+	// matched, and no unconditional edge exists. Return ALL edges so the
+	// caller can apply weight-then-lexical tiebreaking via bestEdge.
+	return edges, nil
 }
 
 func bestEdge(edges []*model.Edge) *model.Edge {
