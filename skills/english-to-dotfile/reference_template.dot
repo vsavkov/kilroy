@@ -19,11 +19,11 @@ digraph reference_template {
     // NOTE: Prompts in this template are abbreviated structural stubs.
     // Generated pipelines must use the full status-file contract from
     // Phase 4 (fallback path + nested-directory warning).
+    exit  [shape=Msquare, label="Exit"]
 
     subgraph cluster_bootstrap {
         label="Bootstrap"
         start [shape=Mdiamond, label="Start"]
-        exit  [shape=Msquare, label="Exit"]
 
         // Toolchain gate — fail fast before LLM stages
         check_toolchain [
