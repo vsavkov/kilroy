@@ -132,7 +132,9 @@ func TestRunWithConfig_APIBackend_HeartbeatEmitsDuringAgentLoop(t *testing.T) {
 }`))
 			return
 		}
-		// Second request onward: return final text.
+		// Second request onward: simulate API thinking time so the heartbeat
+		// goroutine fires at least once before the session completes.
+		time.Sleep(500 * time.Millisecond)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
   "id": "resp_2",

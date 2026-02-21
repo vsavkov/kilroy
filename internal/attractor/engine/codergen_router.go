@@ -301,9 +301,46 @@ func (r *CodergenRouter) runAPI(ctx context.Context, execCtx *Execution, node *m
 				close(done)
 			}()
 
+			// Emit periodic heartbeat events so the stall watchdog
+			// knows the API agent_loop node is alive.
+			heartbeatStop := make(chan struct{})
+			heartbeatDone := make(chan struct{})
+			apiStart := time.Now()
+			go func() {
+				defer close(heartbeatDone)
+				interval := codergenHeartbeatInterval()
+				if interval <= 0 {
+					return
+				}
+				ticker := time.NewTicker(interval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						eventsMu.Lock()
+						count := len(events)
+						eventsMu.Unlock()
+						if execCtx != nil && execCtx.Engine != nil {
+							execCtx.Engine.appendProgress(map[string]any{
+								"event":       "stage_heartbeat",
+								"node_id":     node.ID,
+								"elapsed_s":   int(time.Since(apiStart).Seconds()),
+								"event_count": count,
+							})
+						}
+					case <-heartbeatStop:
+						return
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+
 			text, runErr := sess.ProcessInput(ctx, prompt)
 			sess.Close()
 			<-done
+			close(heartbeatStop)
+			<-heartbeatDone
 			eventsMu.Lock()
 			if err := writeJSON(eventsJSONPath, events); err != nil {
 				warnEngine(execCtx, fmt.Sprintf("write %s: %v", eventsJSONPath, err))
