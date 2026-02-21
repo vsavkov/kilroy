@@ -71,7 +71,7 @@ func TestReferenceTemplate_ImplementFailureRoutedBeforeVerify(t *testing.T) {
 			hasCheckFailTransient = true
 		case e.From == "check_implement" && e.To == "postmortem" && cond == "outcome=fail && context.failure_class!=transient_infra":
 			hasCheckFailDeterministic = true
-		case e.From == "check_implement" && e.To == "verify_fmt" && cond == "outcome=success":
+		case e.From == "check_implement" && e.To == "fix_fmt" && cond == "outcome=success":
 			hasCheckSuccessToVerify = true
 		}
 	}
@@ -96,7 +96,7 @@ func TestReferenceTemplate_DeterministicToolGatesHaveZeroRetries(t *testing.T) {
 	// Deterministic tool gates must have max_retries=0. Re-running a
 	// deterministic check on unchanged code always produces the same
 	// result, so retries just waste cycles before routing to postmortem.
-	deterministicGates := []string{"verify_fmt", "verify_artifacts"}
+	deterministicGates := []string{"fix_fmt", "verify_fmt", "verify_artifacts"}
 	for _, name := range deterministicGates {
 		n := g.Nodes[name]
 		if n == nil {
@@ -159,5 +159,35 @@ func TestReferenceTemplate_ToolchainGateIsOutcomeControlledWithoutPostmortemRest
 			hasPostmortemToToolchain,
 			hasPostmortemRestartToToolchain,
 		)
+	}
+}
+
+func TestReferenceTemplate_HasAutoFixBeforeVerifyFmt(t *testing.T) {
+	g, err := dot.Parse(loadReferenceTemplate(t))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	fixFmt := g.Nodes["fix_fmt"]
+	if fixFmt == nil {
+		t.Fatal("missing fix_fmt node")
+	}
+	if fixFmt.Shape() != "parallelogram" {
+		t.Fatalf("fix_fmt shape must be parallelogram, got %q", fixFmt.Shape())
+	}
+
+	hasCheckImplementToFixFmt := false
+	hasFixFmtToVerifyFmt := false
+	for _, e := range g.Edges {
+		switch {
+		case e.From == "check_implement" && e.To == "fix_fmt" && e.Condition() == "outcome=success":
+			hasCheckImplementToFixFmt = true
+		case e.From == "fix_fmt" && e.To == "verify_fmt":
+			hasFixFmtToVerifyFmt = true
+		}
+	}
+	if !hasCheckImplementToFixFmt || !hasFixFmtToVerifyFmt {
+		t.Fatalf("missing fix_fmt routing: check_implement_to_fix_fmt=%v fix_fmt_to_verify_fmt=%v",
+			hasCheckImplementToFixFmt, hasFixFmtToVerifyFmt)
 	}
 }

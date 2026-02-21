@@ -115,6 +115,16 @@ digraph reference_template {
         ]
         check_implement [shape=diamond, label="Implement OK?"]
 
+        // Auto-fix formatting before verification. Replace placeholder with
+        // the project's canonical formatter (e.g. gofmt -w ., cargo fmt,
+        // black ., prettier --write .). Runs unconditionally so verify_fmt
+        // is a pure assertion.
+        fix_fmt [
+            shape=parallelogram,
+            max_retries=0,
+            tool_command="echo 'Replace with project-specific auto-formatter (e.g. gofmt -w ., cargo fmt, black ., prettier --write .)'; exit 0"
+        ]
+
         // Deterministic verification gates - tool nodes first, then semantic review
         // max_retries=0: format checks are deterministic — re-running on unchanged
         // code always produces the same result. Route to postmortem immediately
@@ -227,7 +237,8 @@ digraph reference_template {
 
     // Verify/check inner loop (tool gates first, semantic review last)
     implement -> check_implement
-    check_implement -> verify_fmt [condition="outcome=success"]
+    check_implement -> fix_fmt [condition="outcome=success"]
+    fix_fmt -> verify_fmt
     check_implement -> implement  [condition="outcome=fail && context.failure_class=transient_infra", loop_restart=true]
     check_implement -> postmortem [condition="outcome=fail && context.failure_class!=transient_infra"]
     check_implement -> postmortem
