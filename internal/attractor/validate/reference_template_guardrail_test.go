@@ -87,6 +87,27 @@ func TestReferenceTemplate_ImplementFailureRoutedBeforeVerify(t *testing.T) {
 	}
 }
 
+func TestReferenceTemplate_DeterministicToolGatesHaveZeroRetries(t *testing.T) {
+	g, err := dot.Parse(loadReferenceTemplate(t))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// Deterministic tool gates must have max_retries=0. Re-running a
+	// deterministic check on unchanged code always produces the same
+	// result, so retries just waste cycles before routing to postmortem.
+	deterministicGates := []string{"verify_fmt", "verify_artifacts"}
+	for _, name := range deterministicGates {
+		n := g.Nodes[name]
+		if n == nil {
+			t.Fatalf("missing node %q", name)
+		}
+		if got := n.Attr("max_retries", ""); got != "0" {
+			t.Errorf("%s: max_retries must be 0 (deterministic check), got %q", name, got)
+		}
+	}
+}
+
 func TestReferenceTemplate_ToolchainGateIsOutcomeControlledWithoutPostmortemRestart(t *testing.T) {
 	g, err := dot.Parse(loadReferenceTemplate(t))
 	if err != nil {
