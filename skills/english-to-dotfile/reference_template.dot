@@ -277,6 +277,11 @@ digraph reference_template {
         //   - Output: root causes, what worked (preserve), what failed
         //     (fix), concrete next changes
         //   - Must NOT direct from-scratch restart — preserve working code
+        // Outcome classification (recovery routing):
+        //   - impl_repair: code repair needed; plan/toolchain still valid
+        //   - needs_replan: plan/approach is inadequate; regenerate plan branches
+        //   - needs_toolchain: environment/bootstrap/toolchain issue detected
+        //   - When uncertain, default to impl_repair
         // Writes: .ai/postmortem_latest.md (overwrite previous)
         // Note: status reflects analysis completion, not implementation state
         postmortem []
@@ -366,6 +371,10 @@ digraph reference_template {
     review_consensus -> exit [condition="outcome=success"]
     review_consensus -> postmortem
 
-    // Hill-climbing loop: continue through prerequisite gate before re-planning
-    postmortem -> check_toolchain
+    // Domain-routed recovery: classify failure and choose the right re-entry
+    postmortem -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra"]
+    postmortem -> implement [condition="outcome=impl_repair"]
+    postmortem -> plan_fanout [condition="outcome=needs_replan"]
+    postmortem -> check_toolchain [condition="outcome=needs_toolchain"]
+    postmortem -> implement
 }

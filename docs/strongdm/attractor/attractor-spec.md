@@ -1508,6 +1508,10 @@ Severity:
 | `prompt_on_conditional_node` | WARNING | Diamond (conditional) nodes should not have a `prompt` attribute — prompts are ignored by the conditional handler. Use shape=box if the prompt should execute. |
 | `loop_restart_failure_class_guard` | WARNING | A `loop_restart=true` edge on a failure path should be guarded by `context.failure_class=transient_infra` and paired with a non-restart deterministic fail edge. |
 | `escalation_models_syntax` | WARNING | `escalation_models` entries must use `provider:model` format (e.g., `"anthropic:claude-opus-4-6"`). |
+| `template_postmortem_replan_entry` | WARNING | For template-provenance graphs (`provenance_version` set), `outcome=needs_replan` should route from `postmortem` to planning entry (`plan_fanout`). |
+| `template_postmortem_broad_rollback` | WARNING | For template-provenance graphs (`provenance_version` set), avoid unconditional `postmortem -> check_toolchain`; prefer conditional domain routing with implement fallback. |
+
+Template-policy lints may be provenance-scoped. Rules keyed to `graph.provenance_version` guide generated default topologies without imposing universal architecture constraints on all DOT graphs.
 
 ### 7.3 Validation API
 

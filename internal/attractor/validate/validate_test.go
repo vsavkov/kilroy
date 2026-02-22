@@ -549,6 +549,101 @@ digraph G {
 	assertNoRule(t, diags, "goal_gate_prompt_status_hint")
 }
 
+func TestValidate_TemplateProvenancePostmortemRouting_WarnsOnNeedsReplanToNonPlanningEntry(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  graph [provenance_version="1"]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  postmortem [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="pm"]
+  implement [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="impl"]
+  debate_consolidate [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="debate"]
+  start -> postmortem
+  postmortem -> debate_consolidate [condition="outcome=needs_replan"]
+  postmortem -> implement
+  implement -> exit [condition="outcome=success"]
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertHasRule(t, diags, "template_postmortem_replan_entry", SeverityWarning)
+}
+
+func TestValidate_TemplateProvenancePostmortemRouting_NoWarningWithoutProvenance(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  postmortem [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="pm"]
+  implement [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="impl"]
+  debate_consolidate [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="debate"]
+  check_toolchain [shape=parallelogram, tool_command="echo ok"]
+  start -> postmortem
+  postmortem -> debate_consolidate [condition="outcome=needs_replan"]
+  postmortem -> check_toolchain
+  postmortem -> implement
+  implement -> exit [condition="outcome=success"]
+  check_toolchain -> implement
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertNoRule(t, diags, "template_postmortem_replan_entry")
+	assertNoRule(t, diags, "template_postmortem_broad_rollback")
+}
+
+func TestValidate_TemplateProvenancePostmortemRouting_WarnsOnUnconditionalToolchainRollback(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  graph [provenance_version="1"]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  postmortem [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="pm"]
+  implement [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="impl"]
+  plan_fanout [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="plan"]
+  check_toolchain [shape=parallelogram, tool_command="echo ok"]
+  start -> postmortem
+  postmortem -> plan_fanout [condition="outcome=needs_replan"]
+  postmortem -> check_toolchain
+  postmortem -> implement
+  implement -> exit [condition="outcome=success"]
+  plan_fanout -> implement
+  check_toolchain -> implement
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertHasRule(t, diags, "template_postmortem_broad_rollback", SeverityWarning)
+	assertNoRule(t, diags, "template_postmortem_replan_entry")
+}
+
+func TestValidate_TemplateProvenancePostmortemRouting_WarnsWhenMissingNeedsReplanRoute(t *testing.T) {
+	g, err := dot.Parse([]byte(`
+digraph G {
+  graph [provenance_version="1"]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  postmortem [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="pm"]
+  implement [shape=box, llm_provider=openai, llm_model=gpt-5.2, prompt="impl"]
+  start -> postmortem
+  postmortem -> implement [condition="outcome=impl_repair"]
+  postmortem -> implement
+  implement -> exit [condition="outcome=success"]
+}
+`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	diags := Validate(g)
+	assertHasRule(t, diags, "template_postmortem_replan_entry", SeverityWarning)
+}
+
 func assertHasRule(t *testing.T, diags []Diagnostic, rule string, sev Severity) {
 	t.Helper()
 	for _, d := range diags {

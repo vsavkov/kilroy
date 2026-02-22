@@ -66,6 +66,7 @@ func Validate(g *model.Graph, extraRules ...LintRule) []Diagnostic {
 	diags = append(diags, lintFailLoopFailureClassGuard(g)...)
 	diags = append(diags, lintEscalationModelsSyntax(g)...)
 	diags = append(diags, lintAllConditionalEdges(g)...)
+	diags = append(diags, lintTemplatePostmortemRecoveryRouting(g)...)
 
 	// Run custom lint rules (spec §7.3: extra_rules appended after built-in rules).
 	for _, rule := range extraRules {
@@ -1155,5 +1156,67 @@ func lintAllConditionalEdges(g *model.Graph) []Diagnostic {
 			})
 		}
 	}
+	return diags
+}
+
+func lintTemplatePostmortemRecoveryRouting(g *model.Graph) []Diagnostic {
+	if g == nil {
+		return nil
+	}
+	if strings.TrimSpace(g.Attrs["provenance_version"]) == "" {
+		return nil
+	}
+	if g.Nodes["postmortem"] == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+	hasAnyNeedsReplan := false
+
+	for _, e := range g.Outgoing("postmortem") {
+		if e == nil {
+			continue
+		}
+		cond := strings.TrimSpace(e.Condition())
+		to := strings.TrimSpace(e.To)
+
+		if cond == "outcome=needs_replan" {
+			hasAnyNeedsReplan = true
+			if to != "plan_fanout" {
+				diags = append(diags, Diagnostic{
+					Rule:     "template_postmortem_replan_entry",
+					Severity: SeverityWarning,
+					NodeID:   "postmortem",
+					EdgeFrom: e.From,
+					EdgeTo:   e.To,
+					Message:  "template-provenance graph routes needs_replan to a non-planning-entry node; route to plan_fanout",
+					Fix:      "set postmortem -> plan_fanout [condition=\"outcome=needs_replan\"]",
+				})
+			}
+		}
+
+		if cond == "" && to == "check_toolchain" {
+			diags = append(diags, Diagnostic{
+				Rule:     "template_postmortem_broad_rollback",
+				Severity: SeverityWarning,
+				NodeID:   "postmortem",
+				EdgeFrom: e.From,
+				EdgeTo:   e.To,
+				Message:  "template-provenance graph has unconditional postmortem rollback to check_toolchain",
+				Fix:      "use conditional routing (impl_repair/needs_replan/needs_toolchain) and keep unconditional fallback to implement",
+			})
+		}
+	}
+
+	if !hasAnyNeedsReplan {
+		diags = append(diags, Diagnostic{
+			Rule:     "template_postmortem_replan_entry",
+			Severity: SeverityWarning,
+			NodeID:   "postmortem",
+			Message:  "template-provenance graph is missing postmortem needs_replan route to plan_fanout",
+			Fix:      "add postmortem -> plan_fanout [condition=\"outcome=needs_replan\"]",
+		})
+	}
+
 	return diags
 }

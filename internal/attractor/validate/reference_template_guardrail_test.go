@@ -120,7 +120,6 @@ func TestReferenceTemplate_ToolchainGateIsOutcomeControlledWithoutPostmortemRest
 	hasToolchainDeterministicFailToPostmortem := false
 	hasToolchainTransientRestart := false
 	hasToolchainBypassToExpand := false
-	hasPostmortemToToolchain := false
 	hasPostmortemRestartToToolchain := false
 
 	for _, e := range g.Edges {
@@ -136,8 +135,6 @@ func TestReferenceTemplate_ToolchainGateIsOutcomeControlledWithoutPostmortemRest
 			hasToolchainTransientRestart = true
 		case e.From == "check_toolchain" && e.To == "expand_spec" && cond == "":
 			hasToolchainBypassToExpand = true
-		case e.From == "postmortem" && e.To == "check_toolchain" && cond == "":
-			hasPostmortemToToolchain = true
 		case e.From == "postmortem" && e.To == "check_toolchain" && e.Attr("loop_restart", "false") == "true":
 			hasPostmortemRestartToToolchain = true
 		}
@@ -148,17 +145,64 @@ func TestReferenceTemplate_ToolchainGateIsOutcomeControlledWithoutPostmortemRest
 		!hasToolchainDeterministicFailToPostmortem ||
 		!hasToolchainTransientRestart ||
 		hasToolchainBypassToExpand ||
-		!hasPostmortemToToolchain ||
 		hasPostmortemRestartToToolchain {
 		t.Fatalf(
-			"missing/broken toolchain gate routing: start_to_toolchain=%v success_to_expand=%v deterministic_fail_to_postmortem=%v transient_restart=%v bypass_to_expand=%v postmortem_to_toolchain=%v postmortem_restart_to_toolchain=%v",
+			"missing/broken toolchain gate routing: start_to_toolchain=%v success_to_expand=%v deterministic_fail_to_postmortem=%v transient_restart=%v bypass_to_expand=%v postmortem_restart_to_toolchain=%v",
 			hasStartToToolchain,
 			hasToolchainSuccessToExpand,
 			hasToolchainDeterministicFailToPostmortem,
 			hasToolchainTransientRestart,
 			hasToolchainBypassToExpand,
-			hasPostmortemToToolchain,
 			hasPostmortemRestartToToolchain,
+		)
+	}
+}
+
+func TestReferenceTemplate_PostmortemRecoveryRouting_IsDomainRouted(t *testing.T) {
+	g, err := dot.Parse(loadReferenceTemplate(t))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	hasImplRepairToImplement := false
+	hasNeedsReplanToPlanFanout := false
+	hasNeedsToolchainToToolchain := false
+	hasTransientFailToToolchain := false
+	hasFallbackToImplement := false
+	hasUnconditionalToToolchain := false
+
+	for _, e := range g.Edges {
+		cond := strings.TrimSpace(e.Condition())
+		switch {
+		case e.From == "postmortem" && e.To == "implement" && cond == "outcome=impl_repair":
+			hasImplRepairToImplement = true
+		case e.From == "postmortem" && e.To == "plan_fanout" && cond == "outcome=needs_replan":
+			hasNeedsReplanToPlanFanout = true
+		case e.From == "postmortem" && e.To == "check_toolchain" && cond == "outcome=needs_toolchain":
+			hasNeedsToolchainToToolchain = true
+		case e.From == "postmortem" && e.To == "check_toolchain" && cond == "outcome=fail && context.failure_class=transient_infra":
+			hasTransientFailToToolchain = true
+		case e.From == "postmortem" && e.To == "implement" && cond == "":
+			hasFallbackToImplement = true
+		case e.From == "postmortem" && e.To == "check_toolchain" && cond == "":
+			hasUnconditionalToToolchain = true
+		}
+	}
+
+	if !hasImplRepairToImplement ||
+		!hasNeedsReplanToPlanFanout ||
+		!hasNeedsToolchainToToolchain ||
+		!hasTransientFailToToolchain ||
+		!hasFallbackToImplement ||
+		hasUnconditionalToToolchain {
+		t.Fatalf(
+			"missing/broken postmortem routing: impl_repair=%v needs_replan_plan_fanout=%v needs_toolchain=%v transient_fail=%v fallback_implement=%v unconditional_toolchain=%v",
+			hasImplRepairToImplement,
+			hasNeedsReplanToPlanFanout,
+			hasNeedsToolchainToToolchain,
+			hasTransientFailToToolchain,
+			hasFallbackToImplement,
+			hasUnconditionalToToolchain,
 		)
 	}
 }
@@ -194,7 +238,8 @@ func TestReferenceTemplate_HasAutoFixBeforeVerifyFmt(t *testing.T) {
 }
 
 func TestReferenceTemplate_PostmortemPromptClarifiesStatusContract(t *testing.T) {
-	g, err := dot.Parse(loadReferenceTemplate(t))
+	template := loadReferenceTemplate(t)
+	g, err := dot.Parse(template)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -202,8 +247,22 @@ func TestReferenceTemplate_PostmortemPromptClarifiesStatusContract(t *testing.T)
 	if pm == nil {
 		t.Fatal("missing postmortem node")
 	}
-	prompt := pm.Attr("prompt", "")
-	if !strings.Contains(prompt, "whether you completed the analysis") {
-		t.Fatal("postmortem prompt must clarify that status reflects analysis completion, not implementation state")
+	templateText := string(template)
+	const startMarker = "// PROMPT: postmortem"
+	const endMarker = "postmortem []"
+	const requiredText = "status reflects analysis completion, not implementation state"
+
+	start := strings.Index(templateText, startMarker)
+	if start < 0 {
+		t.Fatal("missing postmortem prompt guidance block in reference template")
+	}
+	section := templateText[start:]
+	end := strings.Index(section, endMarker)
+	if end < 0 {
+		t.Fatal("missing postmortem node declaration after guidance block")
+	}
+
+	if !strings.Contains(section[:end], requiredText) {
+		t.Fatal("postmortem template guidance must clarify that status reflects analysis completion, not implementation state")
 	}
 }

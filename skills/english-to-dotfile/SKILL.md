@@ -135,6 +135,12 @@ Loop and routing rules:
 - If a node has conditional outgoing edges, add one unconditional fallback edge (no `condition`) to avoid routing gaps.
 - For prerequisite/tool gates and implementation stages, route success/failure explicitly before advancing; do not rely on unconditional edges to progress.
 - For failure back-edges from `shape=diamond` nodes, include `context.failure_class` in the failure condition and keep deterministic fallback routing explicit.
+- Postmortem recovery should be domain-routed with custom outcomes:
+  `impl_repair -> implement`, `needs_replan -> plan_fanout`,
+  `needs_toolchain -> check_toolchain`, plus one unconditional fallback to
+  `implement`.
+- Add explicit handling for postmortem execution failure:
+  `postmortem -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra"]`.
 
 #### Deterministic vs Transient Failures (Failure Classification)
 
@@ -438,6 +444,8 @@ digraph project_pipeline {
 
   review_consensus [shape=box, goal_gate=true]
   postmortem [shape=box]
+  plan_fanout [shape=box]
+  check_toolchain [shape=parallelogram]
 
   start -> implement
   implement -> check_implement
@@ -457,7 +465,13 @@ digraph project_pipeline {
   review_consensus -> exit [condition="outcome=success"]
   review_consensus -> postmortem [condition="outcome=retry"]
   review_consensus -> postmortem
+  postmortem -> check_toolchain [condition="outcome=fail && context.failure_class=transient_infra"]
+  postmortem -> implement [condition="outcome=impl_repair"]
+  postmortem -> plan_fanout [condition="outcome=needs_replan"]
+  postmortem -> check_toolchain [condition="outcome=needs_toolchain"]
   postmortem -> implement
+  plan_fanout -> implement
+  check_toolchain -> implement
 }
 ```
 
@@ -548,6 +562,7 @@ Custom outcomes are allowed if prompts define them explicitly and edges route wi
 48. **Unclassified failure back-edges from diamonds.** Do not use `condition="outcome=fail"` alone on back-edges from `shape=diamond`; add `context.failure_class` guards and explicit deterministic fallback.
 49. **Generic failure_reason on semantic verify gates.** Do not let `verify_fidelity` (or similar semantic review nodes) emit a fixed `failure_reason` like `"semantic_fidelity_gap"` without a content-addressable `failure_signature` in meta. The cycle breaker uses `failure_signature` (if present) instead of `failure_reason` to build the dedup key. If the signature doesn't change when different criteria fail, the cycle breaker kills runs that are making real progress. Always instruct semantic verify nodes to set `failure_signature` to a sorted comma-separated list of the specific failed criteria identifiers (e.g. `"AC-3,AC-7,AC-13"`).
 50. **Implement prompt ignores postmortem on repair iterations.** The implement node prompt must strongly condition on `.ai/postmortem_latest.md` existence. When present, it is a REPAIR iteration: read postmortem first, fix only identified gaps, do not regenerate working systems. When absent, execute `.ai/plan_final.md` as a fresh implementation. Do not use weak "if present" / "prioritize" language that lets the LLM treat repair iterations as fresh implementations.
+51. **Wrong replan target.** Do not route `outcome=needs_replan` to plan fan-in nodes (for example `debate_consolidate`). Route to planning entry (`plan_fanout`) so fresh branch plans are generated before consolidation.
 
 ## Final Pre-Emit Checklist
 
