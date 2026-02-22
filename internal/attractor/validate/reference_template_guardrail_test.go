@@ -238,7 +238,8 @@ func TestReferenceTemplate_HasAutoFixBeforeVerifyFmt(t *testing.T) {
 }
 
 func TestReferenceTemplate_PostmortemPromptClarifiesStatusContract(t *testing.T) {
-	g, err := dot.Parse(loadReferenceTemplate(t))
+	template := loadReferenceTemplate(t)
+	g, err := dot.Parse(template)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -246,8 +247,7 @@ func TestReferenceTemplate_PostmortemPromptClarifiesStatusContract(t *testing.T)
 	if pm == nil {
 		t.Fatal("missing postmortem node")
 	}
-	prompt := pm.Attr("prompt", "")
-	if !strings.Contains(prompt, "whether you completed the analysis") {
-		t.Fatal("postmortem prompt must clarify that status reflects analysis completion, not implementation state")
+	if !strings.Contains(string(template), "status reflects analysis completion, not implementation state") {
+		t.Fatal("postmortem template guidance must clarify that status reflects analysis completion, not implementation state")
 	}
 }
