@@ -125,7 +125,7 @@ func runPreToolHook(ctx context.Context, execCtx *Execution, node *model.Node, s
 		return ""
 	}
 	stdinJSON := buildToolHookStdinJSON(toolName, callID, argsJSON, "", false, "pre")
-	env := toolHookEnv(buildBaseNodeEnv(execCtx.WorktreeDir), node.ID, toolName, callID)
+	env := toolHookEnv(buildBaseNodeEnv(execCtx.WorktreeDir, artifactPolicyFromExecution(execCtx)), node.ID, toolName, callID)
 	exitCode, err := runToolHook(ctx, hookCmd, execCtx.WorktreeDir, env, stdinJSON, stageDir, "pre", callID)
 	if exitCode != 0 {
 		reason := fmt.Sprintf("tool_hooks.pre exit %d for tool=%s call_id=%s: %v", exitCode, toolName, callID, err)
@@ -165,7 +165,7 @@ func executeToolHookForEvent(ctx context.Context, execCtx *Execution, node *mode
 		isErr, _ := ev.Data["is_error"].(bool)
 		fullOutput := fmt.Sprint(ev.Data["full_output"])
 		stdinJSON := buildToolHookStdinJSON(toolName, callID, "", fullOutput, isErr, "post")
-		env := toolHookEnv(buildBaseNodeEnv(execCtx.WorktreeDir), node.ID, toolName, callID)
+		env := toolHookEnv(buildBaseNodeEnv(execCtx.WorktreeDir, artifactPolicyFromExecution(execCtx)), node.ID, toolName, callID)
 		exitCode, err := runToolHook(ctx, hookCmd, execCtx.WorktreeDir, env, stdinJSON, stageDir, "post", callID)
 		if err != nil {
 			execCtx.Engine.Warn(fmt.Sprintf("tool_hooks.post exit %d for tool=%s call_id=%s: %v", exitCode, toolName, callID, err))

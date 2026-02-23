@@ -217,7 +217,7 @@ func (r *CodergenRouter) runAPI(ctx context.Context, execCtx *Execution, node *m
 		for k, v := range buildStageRuntimeEnv(execCtx, node.ID) {
 			stageEnv[k] = v
 		}
-		overrides := buildAgentLoopOverrides(execCtx.WorktreeDir, stageEnv)
+		overrides := buildAgentLoopOverrides(execCtx.WorktreeDir, artifactPolicyFromExecution(execCtx), stageEnv)
 		env := agent.NewLocalExecutionEnvironmentWithPolicy(execCtx.WorktreeDir, overrides, []string{"CLAUDECODE"})
 		text, used, err := r.withFailoverText(ctx, execCtx, node, client, provider, modelID, func(prov string, mid string) (string, error) {
 			var profile agent.ProviderProfile
@@ -972,7 +972,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 	codexSemantics := usesCodexCLISemantics(providerKey, exe)
 
 	// Build the base env once — used by codex initial + retries and non-codex paths.
-	baseEnv := buildBaseNodeEnv(execCtx.WorktreeDir)
+	baseEnv := buildBaseNodeEnv(execCtx.WorktreeDir, artifactPolicyFromExecution(execCtx))
 
 	var isolatedEnv []string
 	var isolatedMeta map[string]any
@@ -982,7 +982,7 @@ func (r *CodergenRouter) runCLI(ctx context.Context, execCtx *Execution, node *m
 		if err != nil {
 			return "", classifiedFailure(err, ""), nil
 		}
-		// CARGO_TARGET_DIR is already set by buildBaseNodeEnv — no need for
+		// CARGO_TARGET_DIR is set by resolved artifact policy env when configured — no need for
 		// the duplicate check that was here before.
 	}
 

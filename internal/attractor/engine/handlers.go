@@ -559,7 +559,7 @@ func (h *ToolHandler) Execute(ctx context.Context, execCtx *Execution, node *mod
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "bash", "-c", cmdStr)
 	cmd.Dir = execCtx.WorktreeDir
-	cmd.Env = buildBaseNodeEnv(execCtx.WorktreeDir)
+	cmd.Env = buildBaseNodeEnv(execCtx.WorktreeDir, artifactPolicyFromExecution(execCtx))
 	// Avoid hanging on interactive reads; tool_command doesn't provide a way to supply stdin.
 	cmd.Stdin = strings.NewReader("")
 	stdoutPath := filepath.Join(stageDir, "stdout.log")
@@ -742,10 +742,10 @@ type Question struct {
 	Type           QuestionType
 	Text           string
 	Options        []Option
-	Default        *Answer            // default answer if timeout/skip (nil = no default)
-	TimeoutSeconds float64            // max wait time; 0 means no timeout
+	Default        *Answer // default answer if timeout/skip (nil = no default)
+	TimeoutSeconds float64 // max wait time; 0 means no timeout
 	Stage          string
-	Metadata       map[string]any     // arbitrary key-value pairs for frontend use
+	Metadata       map[string]any // arbitrary key-value pairs for frontend use
 }
 
 type Option struct {
