@@ -69,6 +69,7 @@ This is a standalone, shippable phase. It intentionally excludes artifact verifi
 - Create: `internal/attractor/engine/artifact_policy.go`
 - Create: `internal/attractor/engine/artifact_policy_test_helpers_test.go`
 - Modify: `internal/attractor/engine/config.go`
+- Modify: `internal/attractor/engine/engine.go`
 - Test: `internal/attractor/engine/config_runtime_policy_test.go`
 - Test: `internal/attractor/engine/checkpoint_exclude_test.go`
 
@@ -128,7 +129,7 @@ func TestApplyConfigDefaults_LegacyGitCheckpointExcludesNotAutoPopulated(t *test
 Run: `go test ./internal/attractor/engine -run '(ArtifactPolicy.*(Initialized|ProfilesDefault|RejectsUnknownProfile|RejectsLegacyGitCheckpointExcludes)|LegacyGitCheckpointExcludesNotAutoPopulated)' -count=1`  
 Expected: FAIL with missing fields/defaults/validation.
 
-- [ ] **Step 3: Implement minimal schema/types and validation in `artifact_policy.go` + `config.go`**
+- [ ] **Step 3: Implement minimal schema/types, add `RunConfigFile` field, and add validation**
 
 ```go
 type ArtifactPolicyConfig struct {
@@ -146,8 +147,10 @@ type ArtifactPolicyCheckpoint struct {
 	ExcludeGlobs []string `json:"exclude_globs,omitempty" yaml:"exclude_globs,omitempty"`
 }
 
-// In RunConfigFile:
-// ArtifactPolicy ArtifactPolicyConfig `json:"artifact_policy,omitempty" yaml:"artifact_policy,omitempty"`
+type RunConfigFile struct {
+	// ... existing fields ...
+	ArtifactPolicy ArtifactPolicyConfig `json:"artifact_policy,omitempty" yaml:"artifact_policy,omitempty"`
+}
 
 func applyArtifactPolicyDefaults(cfg *RunConfigFile) {
 	if len(cfg.ArtifactPolicy.Profiles) == 0 {
@@ -222,6 +225,8 @@ func findEnvPrefix(env []string, prefix string) string {
 }
 ```
 
+- [ ] **Step 4: Migrate checkpoint exclude defaults and consumer source in the same commit**
+
 Migration sequencing requirement:
 - In `applyConfigDefaults`, stop auto-populating `cfg.Git.CheckpointExcludeGlobs`.
 - Keep the legacy field empty by default.
@@ -250,7 +255,7 @@ func TestApplyConfigDefaults_ArtifactPolicyCheckpointExcludeGlobs(t *testing.T) 
 
 Profile whitelist for Part 1: `generic`, `rust`, `go`, `node`, `python`, `java`.
 
-- [ ] **Step 4: Run tests to verify pass**
+- [ ] **Step 5: Run tests to verify pass**
 
 Run: `go test ./internal/attractor/engine -run '(ArtifactPolicy.*(Initialized|ProfilesDefault|RejectsUnknownProfile|RejectsLegacyGitCheckpointExcludes)|LegacyGitCheckpointExcludesNotAutoPopulated)' -count=1`  
 Expected: PASS.
@@ -258,7 +263,7 @@ Expected: PASS.
 Run: `go test ./internal/attractor/engine -run 'CheckpointExcludesConfiguredArtifacts' -count=1`  
 Expected: PASS (ensures Chunk 1 migration did not break existing integration coverage).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add internal/attractor/engine/config.go \
@@ -313,11 +318,23 @@ func TestResolveArtifactPolicy_OSOverridesProfileDefaults(t *testing.T) {
 		t.Fatalf("CARGO_TARGET_DIR=%q want /tmp/from-os", got)
 	}
 }
+
+func TestResolveArtifactPolicy_CheckpointExcludesMirrorConfig(t *testing.T) {
+	cfg := validMinimalRunConfigForTest()
+	cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs = []string{"**/.cargo-target*/**"}
+	rp, err := ResolveArtifactPolicy(cfg, ResolveArtifactPolicyInput{LogsRoot: t.TempDir(), WorktreeDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rp.Checkpoint.ExcludeGlobs) != 1 || rp.Checkpoint.ExcludeGlobs[0] != "**/.cargo-target*/**" {
+		t.Fatalf("checkpoint excludes mismatch: %+v", rp.Checkpoint.ExcludeGlobs)
+	}
+}
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
 
-Run: `go test ./internal/attractor/engine -run 'ResolveArtifactPolicy_(RelativeManagedRootsUseLogsRoot|OSOverridesProfileDefaults)' -count=1`  
+Run: `go test ./internal/attractor/engine -run 'ResolveArtifactPolicy_(RelativeManagedRootsUseLogsRoot|OSOverridesProfileDefaults|CheckpointExcludesMirrorConfig)' -count=1`  
 Expected: FAIL with missing resolver.
 
 - [ ] **Step 3: Implement resolver and runtime wiring**
@@ -372,6 +389,7 @@ var profileDefaultEnv = map[string]map[string]string{
 Runtime wiring:
 - Add `ArtifactPolicy ResolvedArtifactPolicy` to engine runtime state.
 - After this field exists, switch `Engine.checkpointExcludeGlobs()` from `e.RunConfig.ArtifactPolicy...` to `e.ArtifactPolicy.Checkpoint...`.
+- Preserve behavior across the source switch by asserting `ResolvedArtifactPolicy.Checkpoint.ExcludeGlobs` exactly mirrors config values in Part 1.
 - Persist resolved snapshot in checkpoint extension (`checkpoint.Extra["artifact_policy_resolved"]`) with explicit struct tags/versioned envelope.
 - Implement helper `restoreArtifactPolicyForResume(cp *runtime.Checkpoint, cfg *RunConfigFile, in ResolveArtifactPolicyInput) (ResolvedArtifactPolicy, error)` and call it from `resume.go`.
 - On resume, restore from snapshot when present; otherwise resolve from run config.
@@ -509,11 +527,12 @@ Expected: FAIL while Rust hardcoded branches are still present.
 Required edits:
 - `node_env.go`: change `buildBaseNodeEnv` signature to accept resolved policy (`buildBaseNodeEnv(worktreeDir string, rp ResolvedArtifactPolicy)`), delete Rust/Go-specific env branch logic, and merge `rp.Env.Vars` deterministically.
 - `node_env.go`: replace hardcoded `buildAgentLoopOverrides` keep-map with policy-driven forwarding derived from resolved env vars.
-- `node_env.go`: change `buildAgentLoopOverrides` signature to `buildAgentLoopOverrides(worktreeDir string, rp ResolvedArtifactPolicy, contractEnv map[string]string)` so policy is threaded explicitly.
-- `tool_hooks.go`, `handlers.go`, and `codergen_router.go`: update all call sites to pass resolved policy into `buildBaseNodeEnv`.
-- `codergen_router.go` and `api_env_parity_test.go`: update `buildAgentLoopOverrides` call/expectation to use policy-aware signature.
+- `node_env.go`: change `buildAgentLoopOverrides` signature to `buildAgentLoopOverrides(worktreeDir string, rp ResolvedArtifactPolicy, contractEnv map[string]string)` so policy is threaded explicitly, including its internal call to `buildBaseNodeEnv`.
+- `tool_hooks.go`, `handlers.go`, and `codergen_router.go`: update all direct `buildBaseNodeEnv` call sites to pass resolved policy.
+- `codergen_router.go` and `api_env_parity_test.go`: update `buildAgentLoopOverrides` call/expectation to use policy-aware signature (`codergen_router.go` has call sites in both API and CLI paths).
 - ensure deterministic ordering of excludes for stable tests.
 - `node_env_test.go`: explicitly update existing tests that rely on implicit Rust/Go pinning (`TestBuildBaseNodeEnv_PreservesToolchainPaths`, `TestBuildBaseNodeEnv_InfersGoPathsFromHOME`, `TestBuildBaseNodeEnv_GoModCacheUsesFirstGOPATHEntry`, `TestBuildBaseNodeEnv_SetsCargoTargetDirToWorktree`, `TestBuildBaseNodeEnv_DoesNotOverrideExplicitCargoTargetDir`, `TestBuildBaseNodeEnv_InfersToolchainPathsFromHOME`, `TestToolHandler_UsesBaseNodeEnv`, `TestBuildCodexIsolatedEnv_PreservesToolchainPaths`, `TestBuildCodexIsolatedEnvWithName_RetryPreservesToolchainPaths`) to inject policy explicitly in setup/expectations.
+- `node_env_test.go`: also update `TestBuildBaseNodeEnv_StripsClaudeCode` for the new function signature.
 
 - [ ] **Step 4: Run tests to verify pass**
 
@@ -544,7 +563,7 @@ git commit -m "engine: remove hardcoded Rust/Go artifact handling in env and che
 
 ```yaml
 artifact_policy:
-  profiles: ["generic"]
+  profiles: ["rust"]
   env:
     managed_roots:
       tool_cache_root: "managed"
