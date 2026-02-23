@@ -1368,7 +1368,7 @@ func (e *Engine) checkpointExcludeGlobs() []string {
 	if e == nil || e.RunConfig == nil {
 		return nil
 	}
-	return append([]string{}, e.RunConfig.Git.CheckpointExcludeGlobs...)
+	return append([]string{}, e.RunConfig.ArtifactPolicy.Checkpoint.ExcludeGlobs...)
 }
 
 func (e *Engine) writeManifest(baseSHA string) error {

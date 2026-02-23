@@ -24,7 +24,7 @@ func TestRunWithConfig_CheckpointExcludesConfiguredArtifacts(t *testing.T) {
 	cfg.ModelDB.OpenRouterModelInfoPath = pinned
 	cfg.ModelDB.OpenRouterModelInfoUpdatePolicy = "pinned"
 	cfg.Git.RunBranchPrefix = "attractor/run"
-	cfg.Git.CheckpointExcludeGlobs = []string{"**/.cargo_target*/**"}
+	cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs = []string{"**/.cargo_target*/**"}
 
 	dot := []byte(`
 digraph G {

@@ -35,11 +35,61 @@ func TestRuntimePolicy_DefaultsAndValidation(t *testing.T) {
 	}
 }
 
-func TestApplyConfigDefaults_CheckpointExcludeGlobs(t *testing.T) {
+func TestApplyConfigDefaults_ArtifactPolicyCheckpointExcludeGlobs(t *testing.T) {
 	cfg := &RunConfigFile{}
 	applyConfigDefaults(cfg)
 
-	if len(cfg.Git.CheckpointExcludeGlobs) == 0 {
-		t.Fatal("expected non-empty default checkpoint_exclude_globs")
+	if len(cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs) == 0 {
+		t.Fatal("expected non-empty artifact_policy.checkpoint.exclude_globs defaults")
+	}
+	if len(cfg.Git.CheckpointExcludeGlobs) != 0 {
+		t.Fatal("legacy git.checkpoint_exclude_globs must remain empty")
+	}
+}
+
+func TestApplyConfigDefaults_ArtifactPolicyInitialized(t *testing.T) {
+	cfg := &RunConfigFile{}
+	applyConfigDefaults(cfg)
+
+	if cfg.ArtifactPolicy.Env.ManagedRoots == nil {
+		t.Fatal("artifact_policy.env.managed_roots must be initialized")
+	}
+	if cfg.ArtifactPolicy.Env.Overrides == nil {
+		t.Fatal("artifact_policy.env.overrides must be initialized")
+	}
+}
+
+func TestApplyConfigDefaults_ArtifactPolicyProfilesDefault(t *testing.T) {
+	cfg := &RunConfigFile{}
+	applyConfigDefaults(cfg)
+
+	if len(cfg.ArtifactPolicy.Profiles) == 0 {
+		t.Fatal("artifact_policy.profiles must default to a non-empty explicit list")
+	}
+}
+
+func TestValidateConfig_ArtifactPolicyRejectsUnknownProfile(t *testing.T) {
+	cfg := validMinimalRunConfigForTest()
+	cfg.ArtifactPolicy.Profiles = []string{"fortran77"}
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for unknown artifact_policy profile")
+	}
+}
+
+func TestValidateConfig_ArtifactPolicyRejectsLegacyGitCheckpointExcludes(t *testing.T) {
+	cfg := validMinimalRunConfigForTest()
+	cfg.Git.CheckpointExcludeGlobs = []string{"**/tmp-build/**"}
+	if err := validateConfig(cfg); err == nil {
+		t.Fatal("expected legacy git.checkpoint_exclude_globs validation error")
+	}
+}
+
+func TestApplyConfigDefaults_LegacyGitCheckpointExcludesNotAutoPopulated(t *testing.T) {
+	cfg := &RunConfigFile{}
+	applyConfigDefaults(cfg)
+	if len(cfg.Git.CheckpointExcludeGlobs) != 0 {
+		t.Fatal("git.checkpoint_exclude_globs must remain empty after migration to artifact_policy")
 	}
 }

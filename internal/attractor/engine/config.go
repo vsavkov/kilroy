@@ -99,6 +99,8 @@ type RunConfigFile struct {
 		CheckpointExcludeGlobs []string `json:"checkpoint_exclude_globs,omitempty" yaml:"checkpoint_exclude_globs,omitempty"`
 	} `json:"git" yaml:"git"`
 
+	ArtifactPolicy ArtifactPolicyConfig `json:"artifact_policy,omitempty" yaml:"artifact_policy,omitempty"`
+
 	Setup struct {
 		Commands  []string `json:"commands,omitempty" yaml:"commands,omitempty"`
 		TimeoutMS int      `json:"timeout_ms,omitempty" yaml:"timeout_ms,omitempty"`
@@ -152,14 +154,7 @@ func applyConfigDefaults(cfg *RunConfigFile) {
 		cfg.Git.RequireClean = &t
 	}
 	cfg.Git.CheckpointExcludeGlobs = trimNonEmpty(cfg.Git.CheckpointExcludeGlobs)
-	if len(cfg.Git.CheckpointExcludeGlobs) == 0 {
-		cfg.Git.CheckpointExcludeGlobs = []string{
-			"**/.cargo-target*/**",
-			"**/.cargo_target*/**",
-			"**/.wasm-pack/**",
-			"**/.tmpbuild/**",
-		}
-	}
+	applyArtifactPolicyDefaults(cfg)
 	if cfg.LLM.Providers == nil {
 		cfg.LLM.Providers = map[string]ProviderConfig{}
 	}
@@ -318,6 +313,9 @@ func validateConfig(cfg *RunConfigFile) error {
 			return err
 		}
 		cfg.Preflight.PromptProbes.Transports = normalized
+	}
+	if err := validateArtifactPolicyConfig(cfg); err != nil {
+		return err
 	}
 	return nil
 }
