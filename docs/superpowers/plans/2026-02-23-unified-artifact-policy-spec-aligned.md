@@ -84,6 +84,7 @@ This is one subsystem-level refactor (artifact policy contract + engine integrat
 
 - `artifact_policy` in this plan means run-time hygiene policy for build/cache/temp byproducts (env shaping, checkpoint excludes, verification).
 - `ArtifactStore` in `attractor-spec.md` §5.5 remains unchanged and still means named storage for large stage outputs.
+- `checkpoint.Extra` usage in this plan is a Kilroy implementation extension through `internal/attractor/runtime/checkpoint.go` forward-compat field. Core spec checkpoint fields remain unchanged; this plan adds extension data without changing spec-required checkpoint semantics.
 
 ## Chunk 1: Contracts and Resolution
 
@@ -241,14 +242,15 @@ Built-in profile detection contract (must be implemented exactly):
 - detection scope: repository root + recursive scan to depth 6, deterministic lexical ordering
 - no markers found: fallback profile `generic`
 - `profiles.mode=explicit`: use only `profiles.explicit` after validation
-- `profiles.mode=disabled`: disable profile-derived env/verify defaults
+- `profiles.mode=disabled`: disable profile-derived env defaults only; preserve explicit verify/checkpoint rules from config
 
 Built-in profile env contract (default vars when not explicitly set in OS env):
 - `rust`: `CARGO_HOME`, `RUSTUP_HOME`, `CARGO_TARGET_DIR`
 - `go`: `GOPATH`, `GOMODCACHE` (derived from first GOPATH entry + `/pkg/mod`)
 - `node`: `npm_config_cache`, `PNPM_HOME`
 - `python`: `PIP_CACHE_DIR`
-- `java`: `GRADLE_USER_HOME`, `MAVEN_OPTS` cache path support
+- `java`: `GRADLE_USER_HOME`
+- `java` Maven rule: preserve existing `MAVEN_OPTS`; append `-Dmaven.repo.local=<managed_root>/m2` only when that key is not already present (never overwrite existing flags)
 
 - [ ] **Step 1: Write failing resolver tests for auto/explicit behavior**
 
@@ -307,6 +309,20 @@ func TestResolveArtifactPolicy_DisabledModeKeepsVerifyRulesButDisablesProfileEnv
         t.Fatalf("verify deny globs not preserved in disabled mode: %v", rp.Verify.DenyGlobs)
     }
 }
+
+func TestResolveArtifactPolicy_ResolveRootFallsBackToRepoPathWhenWorktreeMissing(t *testing.T) {
+    repo := setupRepoWithFiles(t, []string{"go.mod"})
+    cfg := validMinimalRunConfigForTest()
+    cfg.Repo.Path = repo
+    rp, err := ResolveArtifactPolicy(cfg, ResolveArtifactPolicyInput{
+        LogsRoot:   t.TempDir(),
+        WorktreeDir: filepath.Join(t.TempDir(), "missing-worktree"),
+    })
+    if err != nil { t.Fatal(err) }
+    if !reflect.DeepEqual(rp.ActiveProfiles, []string{"go"}) {
+        t.Fatalf("profiles: got %v want [go]", rp.ActiveProfiles)
+    }
+}
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -341,7 +357,7 @@ type ResolvedArtifactVerify struct {
 // Resolution precedence:
 // 1) explicit OS env value
 // 2) profile override in artifact_policy.env.overrides
-// 3) managed root default derived under {logs_root}/artifacts/managed-roots
+// 3) managed root default derived under {logs_root}/policy-managed-roots
 // 4) built-in per-profile defaults (cargo/go/python/node/java cache roots)
 //
 // Note: `github.com/bmatcuk/doublestar/v4` is already in this repo's module graph,
@@ -349,12 +365,23 @@ type ResolvedArtifactVerify struct {
 //
 // Managed root path rule:
 // - absolute value => use as-is
-// - relative value => resolve under {logs_root}/artifacts/managed-roots/{value}
+// - relative value => resolve under {logs_root}/policy-managed-roots/{value}
 
 func ResolveArtifactPolicy(cfg *RunConfigFile, in ResolveArtifactPolicyInput) (ResolvedArtifactPolicy, error) {
     resolveRoot := strings.TrimSpace(in.WorktreeDir)
+    if resolveRoot != "" {
+        if st, err := os.Stat(resolveRoot); err != nil || !st.IsDir() {
+            resolveRoot = ""
+        }
+    }
     if resolveRoot == "" {
-        resolveRoot = strings.TrimSpace(cfg.Repo.Path)
+        candidate := strings.TrimSpace(cfg.Repo.Path)
+        if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+            resolveRoot = candidate
+        }
+    }
+    if resolveRoot == "" {
+        return ResolvedArtifactPolicy{}, fmt.Errorf("artifact policy resolve root missing: neither worktree nor repo path is a readable directory")
     }
 
     verify := normalizeVerifyRules(cfg.ArtifactPolicy.Verify)
@@ -458,6 +485,8 @@ type Engine struct {
 }
 
 // checkpoint save path (engine.go)
+// Kilroy extension note: cp.Extra is the forward-compat extension field in
+// runtime.Checkpoint; base checkpoint semantics are unchanged.
 cp.Extra["artifact_policy_resolved"] = e.ArtifactPolicy
 if h, err := e.ArtifactPolicy.Hash(); err == nil {
     cp.Extra["artifact_policy_resolved_sha256"] = h
@@ -674,7 +703,7 @@ Expected: FAIL because handler type does not exist.
 
 ```go
 func (h *ArtifactVerifyHandler) Execute(ctx context.Context, execCtx *Execution, node *model.Node) (runtime.Outcome, error) {
-    paths, err := collectChangedPaths(execCtx.WorktreeDir) // git status --porcelain
+    paths, err := collectChangedPaths(execCtx.WorktreeDir) // git status --porcelain=v1 -z --untracked-files=all
     if err != nil {
         return runtime.Outcome{Status: runtime.StatusRetry, FailureReason: err.Error(), Meta: map[string]any{"failure_class": failureClassTransientInfra}}, nil
     }
@@ -707,7 +736,9 @@ func (h *ArtifactVerifyHandler) Execute(ctx context.Context, execCtx *Execution,
 - It evaluates repository state *after* the prior node checkpoint commit.
 - Therefore it is expected to surface paths still present because they are excluded from checkpoint staging or remain untracked.
 - This keeps behavior consistent with the current `verify_artifacts` gate intent while moving logic into a typed handler.
-- It reads `git status --porcelain --untracked-files=all` non-ignored paths; ignored files are intentionally out-of-scope.
+- It reads `git status --porcelain=v1 -z --untracked-files=all` and parses NUL-delimited records (no whitespace/escape ambiguity).
+- Rename/copy records must include destination paths in the evaluated set (and may include source paths for diagnostics).
+- Non-ignored paths only; ignored files are intentionally out-of-scope.
 - To avoid persistent false positives, profile env rules must direct build/cache roots outside the worktree (or projects must explicitly track/ignore them as policy intends).
 
 - [ ] **Step 4: Register handler type and keep routing contract explicit**
@@ -800,7 +831,7 @@ artifact_policy:
 
 Resolver rule for this field:
 - `artifact_policy.env.managed_roots.*` absolute values are used as-is.
-- Relative values are rooted at `{logs_root}/artifacts/managed-roots/` during policy resolution.
+- Relative values are rooted at `{logs_root}/policy-managed-roots/` during policy resolution.
 
 - [ ] **Step 5: Run tests to verify pass**
 
@@ -860,7 +891,7 @@ if got := fmt.Sprint(out.ContextUpdates["failure_class"]); got != failureClassDe
 }
 
 // archive.go exclusion rule:
-// skip logs_root/artifacts/managed-roots/** so policy-managed caches never bloat run.tgz.
+// skip logs_root/policy-managed-roots/** so policy-managed caches never bloat run.tgz.
 ```
 
 - [ ] **Step 4: Run targeted tests to verify pass**
