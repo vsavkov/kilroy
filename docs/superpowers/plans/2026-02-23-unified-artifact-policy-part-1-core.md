@@ -41,7 +41,7 @@ This is a standalone, shippable phase. It intentionally excludes artifact verifi
 - Modify: `internal/attractor/engine/checkpoint_exclude_test.go`  
   Responsibility: migrate integration test input from legacy git excludes to artifact policy excludes in Chunk 1 so early commits stay green.
 - Modify: `internal/attractor/engine/engine.go`  
-  Responsibility: runtime field to hold resolved artifact policy.
+  Responsibility: migrate checkpoint exclude consumer to new source in Chunk 1, then add runtime field to hold resolved artifact policy in Chunk 2.
 - Modify: `internal/attractor/engine/run_with_config.go`  
   Responsibility: resolve policy at run start and attach to engine.
 - Modify: `internal/attractor/engine/resume.go`  
@@ -226,7 +226,7 @@ Migration sequencing requirement:
 - In `applyConfigDefaults`, stop auto-populating `cfg.Git.CheckpointExcludeGlobs`.
 - Keep the legacy field empty by default.
 - Populate defaults in `cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs` instead.
-- In the same chunk, update `Engine.checkpointExcludeGlobs()` in `internal/attractor/engine/engine.go` to read from `e.ArtifactPolicy.Checkpoint.ExcludeGlobs` so checkpoint behavior remains correct immediately after migration.
+- In the same chunk, update `Engine.checkpointExcludeGlobs()` in `internal/attractor/engine/engine.go` to read from `e.RunConfig.ArtifactPolicy.Checkpoint.ExcludeGlobs` so checkpoint behavior remains correct immediately after migration (before `Engine.ArtifactPolicy` exists in Chunk 2).
 - Replace `TestApplyConfigDefaults_CheckpointExcludeGlobs` in `internal/attractor/engine/config_runtime_policy_test.go` with:
 
 ```go
@@ -371,49 +371,41 @@ var profileDefaultEnv = map[string]map[string]string{
 
 Runtime wiring:
 - Add `ArtifactPolicy ResolvedArtifactPolicy` to engine runtime state.
+- After this field exists, switch `Engine.checkpointExcludeGlobs()` from `e.RunConfig.ArtifactPolicy...` to `e.ArtifactPolicy.Checkpoint...`.
 - Persist resolved snapshot in checkpoint extension (`checkpoint.Extra["artifact_policy_resolved"]`) with explicit struct tags/versioned envelope.
+- Implement helper `restoreArtifactPolicyForResume(cp *runtime.Checkpoint, cfg *RunConfigFile, in ResolveArtifactPolicyInput) (ResolvedArtifactPolicy, error)` and call it from `resume.go`.
 - On resume, restore from snapshot when present; otherwise resolve from run config.
 
 - [ ] **Step 4: Write and run resume regression tests**
 
 ```go
-func TestResume_RestoresResolvedArtifactPolicySnapshot(t *testing.T) {
-	repo := initTestRepo(t)
-	logsRoot := t.TempDir()
+func TestRestoreArtifactPolicyForResume_UsesCheckpointSnapshot(t *testing.T) {
+	cp := runtime.NewCheckpoint()
+	cp.Extra = map[string]any{
+		"artifact_policy_resolved": map[string]any{
+			"profiles": []any{"rust"},
+			"env": map[string]any{"vars": map[string]any{"CARGO_TARGET_DIR": "/tmp/policy-target"}},
+		},
+	}
 	cfg := validMinimalRunConfigForTest()
-	cfg.Repo.Path = repo
-	writeRunConfigForResume(t, logsRoot, cfg)
-
-	snap := ResolvedArtifactPolicy{
-		Profiles: []string{"rust"},
-		Env: ResolvedArtifactEnv{Vars: map[string]string{"CARGO_TARGET_DIR": "/tmp/policy-target"}},
-		Checkpoint: ResolvedArtifactCheckpoint{ExcludeGlobs: []string{"**/.cargo-target*/**"}},
-	}
-	writeCheckpointWithResolvedPolicy(t, logsRoot, snap)
-
-	eng, err := Resume(context.Background(), RunOptions{RepoPath: repo, LogsRoot: logsRoot})
+	rp, err := restoreArtifactPolicyForResume(cp, cfg, ResolveArtifactPolicyInput{LogsRoot: t.TempDir(), WorktreeDir: t.TempDir()})
 	if err != nil {
-		t.Fatalf("Resume: %v", err)
+		t.Fatalf("restoreArtifactPolicyForResume: %v", err)
 	}
-	if got := eng.ArtifactPolicy.Env.Vars["CARGO_TARGET_DIR"]; got != "/tmp/policy-target" {
-		t.Fatalf("restored CARGO_TARGET_DIR=%q want /tmp/policy-target", got)
+	if got := rp.Env.Vars["CARGO_TARGET_DIR"]; got != "/tmp/policy-target" {
+		t.Fatalf("CARGO_TARGET_DIR=%q want /tmp/policy-target", got)
 	}
 }
 
-func TestResume_ResolvesPolicyWhenSnapshotMissing(t *testing.T) {
-	repo := initTestRepo(t)
-	logsRoot := t.TempDir()
+func TestRestoreArtifactPolicyForResume_FallsBackToResolverWhenSnapshotMissing(t *testing.T) {
+	cp := runtime.NewCheckpoint() // no artifact_policy_resolved in Extra
 	cfg := validMinimalRunConfigForTest()
-	cfg.Repo.Path = repo
 	cfg.ArtifactPolicy.Profiles = []string{"rust"}
-	writeRunConfigForResume(t, logsRoot, cfg)
-	writeCheckpointWithoutResolvedPolicy(t, logsRoot)
-
-	eng, err := Resume(context.Background(), RunOptions{RepoPath: repo, LogsRoot: logsRoot})
+	rp, err := restoreArtifactPolicyForResume(cp, cfg, ResolveArtifactPolicyInput{LogsRoot: t.TempDir(), WorktreeDir: t.TempDir()})
 	if err != nil {
-		t.Fatalf("Resume: %v", err)
+		t.Fatalf("restoreArtifactPolicyForResume: %v", err)
 	}
-	if len(eng.ArtifactPolicy.Profiles) == 0 {
+	if len(rp.Profiles) == 0 {
 		t.Fatal("expected resolver fallback to populate artifact policy from run config")
 	}
 }
@@ -517,9 +509,11 @@ Expected: FAIL while Rust hardcoded branches are still present.
 Required edits:
 - `node_env.go`: change `buildBaseNodeEnv` signature to accept resolved policy (`buildBaseNodeEnv(worktreeDir string, rp ResolvedArtifactPolicy)`), delete Rust/Go-specific env branch logic, and merge `rp.Env.Vars` deterministically.
 - `node_env.go`: replace hardcoded `buildAgentLoopOverrides` keep-map with policy-driven forwarding derived from resolved env vars.
+- `node_env.go`: change `buildAgentLoopOverrides` signature to `buildAgentLoopOverrides(worktreeDir string, rp ResolvedArtifactPolicy, contractEnv map[string]string)` so policy is threaded explicitly.
 - `tool_hooks.go`, `handlers.go`, and `codergen_router.go`: update all call sites to pass resolved policy into `buildBaseNodeEnv`.
 - `codergen_router.go` and `api_env_parity_test.go`: update `buildAgentLoopOverrides` call/expectation to use policy-aware signature.
 - ensure deterministic ordering of excludes for stable tests.
+- `node_env_test.go`: explicitly update existing tests that rely on implicit Rust/Go pinning (`TestBuildBaseNodeEnv_PreservesToolchainPaths`, `TestBuildBaseNodeEnv_InfersGoPathsFromHOME`, `TestBuildBaseNodeEnv_GoModCacheUsesFirstGOPATHEntry`, `TestBuildBaseNodeEnv_SetsCargoTargetDirToWorktree`, `TestBuildBaseNodeEnv_DoesNotOverrideExplicitCargoTargetDir`, `TestBuildBaseNodeEnv_InfersToolchainPathsFromHOME`, `TestToolHandler_UsesBaseNodeEnv`, `TestBuildCodexIsolatedEnv_PreservesToolchainPaths`, `TestBuildCodexIsolatedEnvWithName_RetryPreservesToolchainPaths`) to inject policy explicitly in setup/expectations.
 
 - [ ] **Step 4: Run tests to verify pass**
 
