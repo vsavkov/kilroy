@@ -62,6 +62,7 @@ This is one subsystem-level refactor (artifact policy contract + engine integrat
 - Modify: `internal/attractor/engine/codergen_router.go`
 - Modify: `internal/attractor/engine/tool_hooks.go`
 - Modify: `internal/attractor/engine/checkpoint_exclude_test.go`
+- Modify: `internal/attractor/engine/archive.go`
 - Modify: `skills/english-to-dotfile/reference_template.dot`
 - Modify: `demo/rogue/rogue.dot`
 - Modify: `skills/english-to-dotfile/SKILL.md`
@@ -279,6 +280,33 @@ func TestResolveArtifactPolicy_DenyAllowPrecedence(t *testing.T) {
         t.Fatalf("unexpected offending paths: %v", v.OffendingPaths)
     }
 }
+
+func TestResolveArtifactPolicy_ExplicitModeUsesOnlyRequestedProfiles(t *testing.T) {
+    repo := setupRepoWithFiles(t, []string{"Cargo.toml", "package.json", "go.mod"})
+    cfg := validMinimalRunConfigForTest()
+    cfg.Repo.Path = repo
+    cfg.ArtifactPolicy.Profiles.Mode = "explicit"
+    cfg.ArtifactPolicy.Profiles.Explicit = []string{"go"}
+    rp, err := ResolveArtifactPolicy(cfg, ResolveArtifactPolicyInput{LogsRoot: t.TempDir(), WorktreeDir: repo})
+    if err != nil { t.Fatal(err) }
+    if !reflect.DeepEqual(rp.ActiveProfiles, []string{"go"}) {
+        t.Fatalf("profiles: got %v want [go]", rp.ActiveProfiles)
+    }
+}
+
+func TestResolveArtifactPolicy_DisabledModeKeepsVerifyRulesButDisablesProfileEnv(t *testing.T) {
+    cfg := validMinimalRunConfigForTest()
+    cfg.ArtifactPolicy.Profiles.Mode = "disabled"
+    cfg.ArtifactPolicy.Verify.DenyGlobs = []string{"**/dist/**"}
+    rp, err := ResolveArtifactPolicy(cfg, ResolveArtifactPolicyInput{LogsRoot: t.TempDir(), WorktreeDir: cfg.Repo.Path})
+    if err != nil { t.Fatal(err) }
+    if len(rp.Env.Vars) != 0 {
+        t.Fatalf("expected no profile-derived env vars in disabled mode, got %v", rp.Env.Vars)
+    }
+    if !reflect.DeepEqual(rp.Verify.DenyGlobs, []string{"**/dist/**"}) {
+        t.Fatalf("verify deny globs not preserved in disabled mode: %v", rp.Verify.DenyGlobs)
+    }
+}
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -324,21 +352,26 @@ type ResolvedArtifactVerify struct {
 // - relative value => resolve under {logs_root}/artifacts/managed-roots/{value}
 
 func ResolveArtifactPolicy(cfg *RunConfigFile, in ResolveArtifactPolicyInput) (ResolvedArtifactPolicy, error) {
+    resolveRoot := strings.TrimSpace(in.WorktreeDir)
+    if resolveRoot == "" {
+        resolveRoot = strings.TrimSpace(cfg.Repo.Path)
+    }
+
+    verify := normalizeVerifyRules(cfg.ArtifactPolicy.Verify)
+    checkpoint := trimNonEmpty(cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs)
+
     if strings.EqualFold(strings.TrimSpace(cfg.ArtifactPolicy.Profiles.Mode), "disabled") {
         return ResolvedArtifactPolicy{
             ActiveProfiles: nil,
             Env:            ResolvedArtifactEnv{Vars: map[string]string{}},
             ManagedRoots:   map[string]string{},
-            Checkpoint:     ResolvedArtifactCheckpoint{ExcludeGlobs: trimNonEmpty(cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs)},
-            Verify:         ResolvedArtifactVerify{DenyGlobs: nil, AllowGlobs: nil},
+            Checkpoint:     ResolvedArtifactCheckpoint{ExcludeGlobs: checkpoint},
+            Verify:         verify, // keep explicit verify rules; only profile-derived env is disabled
         }, nil
     }
 
-    profiles, err := resolveProfiles(cfg.ArtifactPolicy.Profiles, cfg.Repo.Path)
+    profiles, err := resolveProfiles(cfg.ArtifactPolicy.Profiles, resolveRoot)
     if err != nil { return ResolvedArtifactPolicy{}, err }
-
-    verify := normalizeVerifyRules(cfg.ArtifactPolicy.Verify)
-    checkpoint := trimNonEmpty(cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs)
 
     env, managedRoots := resolveEnvPolicy(profiles, cfg.ArtifactPolicy.Env, in.LogsRoot, in.WorktreeDir)
 
@@ -404,6 +437,11 @@ func TestResume_UsesCheckpointedResolvedArtifactPolicy(t *testing.T) {
     // 3) resume from checkpoint
     // 4) assert resumed engine keeps checkpointed active profiles, not new detection
 }
+
+func TestResume_FailsWhenSnapshottedRunConfigIsInvalid(t *testing.T) {
+    // corrupt logs_root/run_config.json and assert Resume returns error
+    // instead of silently falling back to simulated backend.
+}
 ```
 
 - [ ] **Step 2: Run tests to verify failure**
@@ -432,6 +470,14 @@ if h, err := e.ArtifactPolicy.Hash(); err == nil {
 
 ```go
 // resume.go
+if _, statErr := os.Stat(cfgPath); statErr == nil {
+    loaded, loadErr := LoadRunConfigFile(cfgPath)
+    if loadErr != nil {
+        return nil, fmt.Errorf("resume: load run config snapshot: %w", loadErr)
+    }
+    cfg = loaded
+}
+
 if raw := cp.Extra["artifact_policy_resolved"]; raw != nil {
     restored, err := decodeResolvedArtifactPolicy(raw)
     if err != nil {
@@ -778,6 +824,7 @@ git commit -m "skills/template: migrate verify_artifacts to built-in verify.arti
 - Create: `internal/attractor/engine/artifact_policy_integration_test.go`
 - Modify: `internal/attractor/engine/run_with_config_integration_test.go`
 - Modify: `internal/attractor/engine/resume_test.go`
+- Modify: `internal/attractor/engine/archive.go`
 
 - [ ] **Step 1: Write failing integration tests covering core gaps**
 
@@ -786,6 +833,7 @@ func TestRun_ArtifactVerifyHandler_EmitsOffendingPaths(t *testing.T) {}
 func TestRun_ArtifactVerifyHandler_AllowGlobCarveOut(t *testing.T) {}
 func TestRun_ArtifactPolicy_AutoProfiles_MultiLanguageRepo(t *testing.T) {}
 func TestResume_ArtifactPolicySnapshotStableAcrossRepoMutation(t *testing.T) {}
+func TestRunArchive_ExcludesManagedRootsCaches(t *testing.T) {}
 ```
 
 - [ ] **Step 2: Run targeted tests to verify failure**
@@ -810,6 +858,9 @@ if _, ok := details["offending_paths"]; !ok {
 if got := fmt.Sprint(out.ContextUpdates["failure_class"]); got != failureClassDeterministic {
     t.Fatalf("failure_class: got %q want %q", got, failureClassDeterministic)
 }
+
+// archive.go exclusion rule:
+// skip logs_root/artifacts/managed-roots/** so policy-managed caches never bloat run.tgz.
 ```
 
 - [ ] **Step 4: Run targeted tests to verify pass**
@@ -827,7 +878,8 @@ Expected: PASS.
 ```bash
 git add internal/attractor/engine/artifact_policy_integration_test.go \
   internal/attractor/engine/run_with_config_integration_test.go \
-  internal/attractor/engine/resume_test.go
+  internal/attractor/engine/resume_test.go \
+  internal/attractor/engine/archive.go
 git commit -m "engine/tests: add artifact policy integration and resume determinism regressions"
 ```
 
