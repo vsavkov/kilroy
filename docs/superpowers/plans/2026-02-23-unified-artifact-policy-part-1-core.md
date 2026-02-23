@@ -146,6 +146,9 @@ type ArtifactPolicyCheckpoint struct {
 	ExcludeGlobs []string `json:"exclude_globs,omitempty" yaml:"exclude_globs,omitempty"`
 }
 
+// In RunConfigFile:
+// ArtifactPolicy ArtifactPolicyConfig `json:"artifact_policy,omitempty" yaml:"artifact_policy,omitempty"`
+
 func applyArtifactPolicyDefaults(cfg *RunConfigFile) {
 	if len(cfg.ArtifactPolicy.Profiles) == 0 {
 		cfg.ArtifactPolicy.Profiles = []string{"generic"}
@@ -181,7 +184,7 @@ func validateArtifactPolicyConfig(cfg *RunConfigFile) error {
 		}
 	}
 	if len(cfg.Git.CheckpointExcludeGlobs) > 0 {
-		return fmt.Errorf("git.checkpoint_exclude_globs is not supported in Part 1; use artifact_policy.checkpoint.exclude_globs")
+		return fmt.Errorf("git.checkpoint_exclude_globs is deprecated; use artifact_policy.checkpoint.exclude_globs")
 	}
 	return nil
 }
@@ -223,6 +226,7 @@ Migration sequencing requirement:
 - In `applyConfigDefaults`, stop auto-populating `cfg.Git.CheckpointExcludeGlobs`.
 - Keep the legacy field empty by default.
 - Populate defaults in `cfg.ArtifactPolicy.Checkpoint.ExcludeGlobs` instead.
+- In the same chunk, update `Engine.checkpointExcludeGlobs()` in `internal/attractor/engine/engine.go` to read from `e.ArtifactPolicy.Checkpoint.ExcludeGlobs` so checkpoint behavior remains correct immediately after migration.
 - Replace `TestApplyConfigDefaults_CheckpointExcludeGlobs` in `internal/attractor/engine/config_runtime_policy_test.go` with:
 
 ```go
@@ -261,6 +265,7 @@ git add internal/attractor/engine/config.go \
   internal/attractor/engine/artifact_policy.go \
   internal/attractor/engine/artifact_policy_test_helpers_test.go \
   internal/attractor/engine/config_runtime_policy_test.go \
+  internal/attractor/engine/engine.go \
   internal/attractor/engine/checkpoint_exclude_test.go
 git commit -m "engine/config: add minimal artifact_policy run-config contract"
 ```
@@ -342,6 +347,11 @@ type ResolvedArtifactCheckpoint struct {
 	ExcludeGlobs []string
 }
 
+type ResolveArtifactPolicyInput struct {
+	LogsRoot    string
+	WorktreeDir string
+}
+
 var profileDefaultEnv = map[string]map[string]string{
 	"generic": {},
 	"rust": {
@@ -368,11 +378,44 @@ Runtime wiring:
 
 ```go
 func TestResume_RestoresResolvedArtifactPolicySnapshot(t *testing.T) {
-	// Build checkpoint with Extra["artifact_policy_resolved"], resume, assert engine policy equals snapshot.
+	repo := initTestRepo(t)
+	logsRoot := t.TempDir()
+	cfg := validMinimalRunConfigForTest()
+	cfg.Repo.Path = repo
+	writeRunConfigForResume(t, logsRoot, cfg)
+
+	snap := ResolvedArtifactPolicy{
+		Profiles: []string{"rust"},
+		Env: ResolvedArtifactEnv{Vars: map[string]string{"CARGO_TARGET_DIR": "/tmp/policy-target"}},
+		Checkpoint: ResolvedArtifactCheckpoint{ExcludeGlobs: []string{"**/.cargo-target*/**"}},
+	}
+	writeCheckpointWithResolvedPolicy(t, logsRoot, snap)
+
+	eng, err := Resume(context.Background(), RunOptions{RepoPath: repo, LogsRoot: logsRoot})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if got := eng.ArtifactPolicy.Env.Vars["CARGO_TARGET_DIR"]; got != "/tmp/policy-target" {
+		t.Fatalf("restored CARGO_TARGET_DIR=%q want /tmp/policy-target", got)
+	}
 }
 
 func TestResume_ResolvesPolicyWhenSnapshotMissing(t *testing.T) {
-	// Older checkpoint path: no snapshot, config provided, resolver runs once and populates engine policy.
+	repo := initTestRepo(t)
+	logsRoot := t.TempDir()
+	cfg := validMinimalRunConfigForTest()
+	cfg.Repo.Path = repo
+	cfg.ArtifactPolicy.Profiles = []string{"rust"}
+	writeRunConfigForResume(t, logsRoot, cfg)
+	writeCheckpointWithoutResolvedPolicy(t, logsRoot)
+
+	eng, err := Resume(context.Background(), RunOptions{RepoPath: repo, LogsRoot: logsRoot})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if len(eng.ArtifactPolicy.Profiles) == 0 {
+		t.Fatal("expected resolver fallback to populate artifact policy from run config")
+	}
 }
 ```
 
@@ -398,7 +441,6 @@ git commit -m "engine/runtime: resolve artifact policy once and restore on resum
 **Files:**
 - Modify: `internal/attractor/engine/node_env.go`
 - Modify: `internal/attractor/engine/node_env_test.go`
-- Modify: `internal/attractor/engine/engine.go`
 - Modify: `internal/attractor/engine/tool_hooks.go`
 - Modify: `internal/attractor/engine/handlers.go`
 - Modify: `internal/attractor/engine/codergen_router.go`
@@ -477,7 +519,6 @@ Required edits:
 - `node_env.go`: replace hardcoded `buildAgentLoopOverrides` keep-map with policy-driven forwarding derived from resolved env vars.
 - `tool_hooks.go`, `handlers.go`, and `codergen_router.go`: update all call sites to pass resolved policy into `buildBaseNodeEnv`.
 - `codergen_router.go` and `api_env_parity_test.go`: update `buildAgentLoopOverrides` call/expectation to use policy-aware signature.
-- `engine.go`: source checkpoint `:(exclude)` pathspec globs only from `Engine.ArtifactPolicy.Checkpoint.ExcludeGlobs`.
 - ensure deterministic ordering of excludes for stable tests.
 
 - [ ] **Step 4: Run tests to verify pass**
@@ -490,7 +531,6 @@ Expected: PASS.
 ```bash
 git add internal/attractor/engine/node_env.go \
   internal/attractor/engine/node_env_test.go \
-  internal/attractor/engine/engine.go \
   internal/attractor/engine/tool_hooks.go \
   internal/attractor/engine/handlers.go \
   internal/attractor/engine/codergen_router.go \
@@ -522,6 +562,8 @@ artifact_policy:
       - "**/.cargo-target*/**"
       - "**/.cargo_target*/**"
 ```
+
+Note: `"{managed_roots.tool_cache_root}/cargo-target"` is an intentional literal resolver template, not YAML interpolation.
 
 Run-config migration note for Part 1:
 - `git.checkpoint_exclude_globs` is rejected by validation.
