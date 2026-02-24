@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,7 +59,9 @@ type PreflightConfig struct {
 }
 
 type RunConfigFile struct {
-	Version int `json:"version" yaml:"version"`
+	Version int    `json:"version" yaml:"version"`
+	Graph   string `json:"graph,omitempty" yaml:"graph,omitempty"`
+	Task    string `json:"task,omitempty" yaml:"task,omitempty"`
 
 	Repo struct {
 		Path string `json:"path" yaml:"path"`
@@ -119,11 +123,11 @@ func LoadRunConfigFile(path string) (*RunConfigFile, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
 	case ".json":
-		if err := json.Unmarshal(b, &cfg); err != nil {
+		if err := decodeJSONStrict(b, &cfg); err != nil {
 			return nil, err
 		}
 	default:
-		if err := yaml.Unmarshal(b, &cfg); err != nil {
+		if err := decodeYAMLStrict(b, &cfg); err != nil {
 			return nil, err
 		}
 	}
@@ -132,6 +136,38 @@ func LoadRunConfigFile(path string) (*RunConfigFile, error) {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func decodeJSONStrict(b []byte, cfg *RunConfigFile) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(cfg); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("json: multiple top-level values are not allowed")
+		}
+		return err
+	}
+	return nil
+}
+
+func decodeYAMLStrict(b []byte, cfg *RunConfigFile) error {
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("yaml: multiple documents are not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 func applyConfigDefaults(cfg *RunConfigFile) {
